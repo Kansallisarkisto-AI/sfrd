@@ -2,7 +2,7 @@
 Structure from Repeating Documents (SfRD) discovers and/or exploits structure in repeating series of documents to facilitate automated creation of research databases in a semi-supervised (and potentially fully unsupervised) manner, even in the presence of degradations and nuisance features. SfRD is inspired by Structure from motion (SfM) methods for reconstructing 3D structures from 2D images.
 
 ## Usage
-Install this package and run the ```structuralizer``` command for help. User documentation will be added as the project matures.
+Install this package and the nafhtr library from [this branch](https://github.com/Kansallisarkisto-AI/rfdetr_trocr_pipeline/tree/make-library), then run the ```structuralizer``` command for help. User documentation will be added as the project matures.
 
 ## Motivation
 Traditional image registration methods can be used to align digitized forms and index cards onto a single annotated template. However, image registration sometimes fails when the features are not sufficiently invariant to changing imaging conditions or there are too many nuisance features relative to template features, such as written content, degradations or minor template revisions in the documents. In archives, utilizing the full series of repeating documents enables us to reliably separate stable template features from the per-page variable content. 
