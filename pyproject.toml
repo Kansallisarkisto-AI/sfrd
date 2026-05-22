@@ -1,0 +1,52 @@
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[project]
+name = "sfrd"
+version = "0.1"
+dependencies = [
+  "opencv-python-headless>=4.10",
+  "numpy>=2",
+  "numba>=0.64.0",
+  "pillow>=12.1.1",
+  "ImageHash>=4.3.2",
+  "tqdm>=4.67.3",
+  "scikit-learn>=1.8.0",
+  "scikit-image>=0.26.0",
+  "polars>=1.40.1",
+  "torch>=2.3"
+]
+requires-python = ">=3.11"
+authors = [
+  {name = "John Mäkelä", email = "john.makela@kansallisarkisto.fi"},
+]
+maintainers = [
+  {name = "John Mäkelä", email = "john.makela@kansallisarkisto.fi"}
+]
+description = "Structure from Repeating Documents (SfRD) discovers and/or exploits structure in repeating series of segmented documents to facilitate automated creation of research databases in a semi-supervised (and potentially fully unsupervised) manner."
+readme = "README.md"
+license = "Apache-2.0"
+license-files = ["LICEN[CS]E.*"]
+keywords = ["document understanding", "document", "analysis", "sfrd", "structure"]
+classifiers = [
+  "Development Status :: 3 - Alpha",
+  "Programming Language :: Python :: 3.12",
+  "Environment :: Console",
+  "Environment :: GPU",
+  "License :: OSI Approved :: Apache Software License",
+  "Operating System :: POSIX :: Linux",
+  "Intended Audience :: Science/Research",
+  "Topic :: Scientific/Engineering :: Artificial Intelligence",
+  "Topic :: Scientific/Engineering :: Image Recognition"
+]
+
+[project.urls]
+Homepage = "https://github.com/Kansallisarkisto-AI/sfrd"
+Documentation = "https://readthedocs.org"
+Repository = "https://github.com/Kansallisarkisto-AI/sfrd"
+"Bug Tracker" = "https://github.com/Kansallisarkisto-AI/sfrd/issues"
+Changelog = "https://github.com/Kansallisarkisto-AI/sfrd/blob/master/CHANGELOG.md"
+
+[project.scripts]
+structuralizer = "sfrd:cli.main"
