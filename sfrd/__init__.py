@@ -1,7 +1,8 @@
 from .page_alignment import align_pages
 from .annotations_yolo import load_yolo_obb_labels, load_classes
 from .transforms import apply_affine_numba, invert_affine_numba
-from .feats import apply_sitk_transform_to_points
+from .feats import apply_sitk_transform_to_points, apply_tps
+from .config import config
 
 __all__ = [
     "align_pages",
@@ -9,5 +10,7 @@ __all__ = [
     "load_classes",
     "apply_affine_numba",
     "invert_affine_numba",
-    "apply_sitk_transform_to_points"
+    "apply_sitk_transform_to_points",
+    "config",
+    "apply_tps"
 ]

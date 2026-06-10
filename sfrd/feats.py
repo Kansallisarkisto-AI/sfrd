@@ -7,6 +7,7 @@ import SimpleITK as sitk
 
 from .transforms import apply_affine_numba, invert_affine_numba
 from .config import config
+from .ioutils import read_image_cv
 
 FLANN_INDEX_KDTREE = 1
 # 1 thread for now because we use multiprocessing elsewhere
@@ -448,3 +449,87 @@ def fullscale_bsplinegrid_from_landmarks(page, page_idx, M_full, page_scale, roo
         print("Ratio      :", before.mean() / after.mean())
 
     return output_transform
+
+def apply_tps(tps, pts):
+    retval, transformed_pts = tps.applyTransformation(pts)
+    return transformed_pts
+
+def fullscale_thinplatespline_from_landmarks(page, page_idx, M_full, page_scale, root_scale, fi, kpnode_to_lm, lm_canon,
+                                             regularization_parameter=0.05):
+    """
+    Estimate a thin plate spline (TPS) transformation using correspondences between page keypoints and root canonical keypoints.
+    Transformation is calculated from root to page, in current page coordinate system instead of the root's coordinate system.
+    That is because the TPS transformation will be applied as a post-correction _after_ the root annotation 
+    has been converted to the page coordinate sytem (with the inverse affine transformation).
+    Here we use all keypoints (not only inliers), since we are trying to correct for the small-scale deformations
+    which might mean points that are not inliers after the simpler RANSAC/affine fit. Hopefully any erraneous matches
+    won't affect the estimation too much or the errors will balance out.
+
+        Returns None if estimation fails.
+    """
+    root_landmarks = [] # in page coordinate system (not in the root's coordinate system!)
+    page_landmarks = [] # in page coordinate system
+    for kpidx, kp in enumerate(fi.keypoints):
+        lm = kpnode_to_lm.get((page_idx, kpidx))
+        if lm is None:
+            continue
+        canon = lm_canon.get(lm)
+        if canon is None:
+            continue
+        
+        # Landmarks' (X, Y) pairs are flattened into 1-d lists.
+        # kp[0] = kp.pt, keypoint location in image
+        page_landmarks.append((kp[0][0] / page_scale, kp[0][1] / page_scale))  # scale into fullres
+        # canon keypoint location (in root frame)
+        root_landmarks.append((float(canon[0]) / root_scale, float(canon[1]) / root_scale))  # scale into fullres
+    
+    root_landmarks = np.asarray(root_landmarks, dtype=np.float32)
+    page_landmarks = np.asarray(page_landmarks, dtype=np.float32)
+
+    M_root_to_page_full = invert_affine_numba(M_full)
+
+    root_landmarks_array = np.asarray(root_landmarks, dtype=np.float64)
+
+    root_landmarks = apply_affine_numba(
+        M_root_to_page_full,
+        root_landmarks_array,
+    )
+
+    root_landmarks = root_landmarks.reshape(1, -1, 2)
+    page_landmarks = page_landmarks.reshape(1, -1, 2)
+
+    # create matches
+    n_landmarks = root_landmarks.shape[1]
+    matches = [cv2.DMatch(i, i, 0) for i in range(n_landmarks)]
+
+    # Initialize TPS transformer
+    tps = cv2.createThinPlateSplineShapeTransformer()
+
+    img = read_image_cv(page)
+    diagonal = math.sqrt(img.shape[0]**2 + img.shape[1]**2)
+
+    tps.setRegularizationParameter(regularization_parameter * diagonal)
+
+    # Estimate
+    tps.estimateTransformation(root_landmarks, page_landmarks, matches)
+
+
+    if config["debug"]["enabled"]:
+        src = root_landmarks.reshape(-1, 2).astype(np.float64)
+        dst = page_landmarks.reshape(-1, 2).astype(np.float64)
+
+        print(f"Landmarks for TPS: {src.shape[0]}")
+
+        before = np.linalg.norm(dst - src, axis=1)
+
+        warped = apply_tps(tps, root_landmarks)
+        warped = np.asarray(warped, dtype=np.float64).reshape(-1, 2)
+
+        after = np.linalg.norm(dst - warped, axis=1)
+
+        print("Before mean:", before.mean())
+        print("After mean :", after.mean())
+        print("Reduction  :", before.mean() - after.mean())
+        print("Ratio      :", before.mean() / after.mean() if after.mean() > 0 else np.inf)
+
+    return tps

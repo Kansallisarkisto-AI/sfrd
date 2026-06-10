@@ -11,7 +11,11 @@ import time
 from sklearn.neighbors import NearestNeighbors
 
 from .ioutils import read_image_cv
-from .feats import SIFTMatcher, SIFTFeatures, SIFTFeaturesCopy, affine_is_valid, estimate_affine_from_landmarks, fullscale_bsplinegrid_from_landmarks
+
+from .feats import SIFTMatcher, SIFTFeatures, SIFTFeaturesCopy, affine_is_valid, \
+                   estimate_affine_from_landmarks, fullscale_bsplinegrid_from_landmarks, \
+                   fullscale_thinplatespline_from_landmarks
+
 from .graph import propagate_transforms_multi_source_dijkstra_numba
 from .graph import build_tracks_and_canonical
 from .transforms import lift_affine_to_fullres
@@ -559,6 +563,11 @@ def _align_worker(page_idx):
         bspline_transformation = fullscale_bsplinegrid_from_landmarks(page, page_idx, M_full,
                                                 s_mov_small, _final_s_root_small,
                                                 fi, _final_kpnode_to_lm, _final_lm_canon)
+    elif config["thinplate"]["enabled"]:
+        bspline_transformation = fullscale_thinplatespline_from_landmarks(page, page_idx, M_full,
+                                        s_mov_small, _final_s_root_small,
+                                        fi, _final_kpnode_to_lm, _final_lm_canon, 
+                                        regularization_parameter=config["thinplate"]["regularization_parameter"])
     else:
         bspline_transformation = None
 
@@ -774,7 +783,7 @@ def align_pages(
         root_index, transformation_to_root, inlier_count, page, mean_residual, bspline = value
         pretty_output_dict[all_images[id]] = {"root_path": all_images[root_index],
                                                "transformation_to_root": transformation_to_root,
-                                               "bspline_transformation_post": bspline,
+                                               "post_transformation": bspline,
                                                "inlier_count": inlier_count, "mean_residual": mean_residual}
     return pretty_output_dict, unaligned
 

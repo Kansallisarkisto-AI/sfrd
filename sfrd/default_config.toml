@@ -41,9 +41,15 @@ min_matches = 30
 max_iters = 5000
 confidence = 0.999
 
-[bspline]
+# Thin plate spline post-transform with regularization
+[thinplate]
 enabled = true
-cells_on_shorter_side = 4
+regularization_parameter = 0.05  # regularizes
+
+# alternative to thinplate, will only be enabled if thinplate is not enabled
+[bspline]
+enabled = false
+cells_on_shorter_side = 4  # regularizes
 
 [page_alignment]
 # minimum number of pages with a transform to root for track to be considered valid
@@ -65,4 +71,4 @@ max_scale = 1.2
 max_rotation_deg = 15
 
 [debug]
-enabled = false
+enabled = true

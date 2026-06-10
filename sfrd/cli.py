@@ -1,4 +1,7 @@
-from sfrd import align_pages, load_yolo_obb_labels, load_classes, invert_affine_numba, apply_affine_numba, apply_sitk_transform_to_points
+from sfrd import align_pages, load_yolo_obb_labels, load_classes, \
+                 invert_affine_numba, apply_affine_numba, apply_sitk_transform_to_points, \
+                 config, apply_tps
+
 from nafhtr import *
 import argparse
 import torch
@@ -665,21 +668,34 @@ def process_single_image(worker_args):
         alignment_result["transformation_to_root"]
     )
 
-    bspline = alignment_result["bspline_transformation_post"]
-
-    # TRANSFORM ANNOTATION POLYGONS
-    # first apply affine transformation from root to page,
-    # then apply B-Spline transformation (in page coordinates, nothing happens if it is None)
-    annotations = [
-        (
-            class_id,
-            apply_sitk_transform_to_points(
-                bspline,
-                apply_affine_numba(M_root_to_page, polygon)
+    if config["thinplate"]["enabled"]:
+        tps = alignment_result["post_transformation"]
+        # TRANSFORM ANNOTATION POLYGONS
+        # first apply affine transformation from root to page,
+        # then apply B-Spline transformation (in page coordinates, nothing happens if it is None)
+        annotations = [
+            (
+                class_id,
+                apply_tps(tps, apply_affine_numba(M_root_to_page, polygon).astype(np.float32))
             )
-        )
-        for class_id, polygon in annotations
-    ]
+            for class_id, polygon in annotations
+        ]
+    else:
+        bspline = alignment_result["post_transformation"]
+
+        # TRANSFORM ANNOTATION POLYGONS
+        # first apply affine transformation from root to page,
+        # then apply B-Spline transformation (in page coordinates, nothing happens if it is None)
+        annotations = [
+            (
+                class_id,
+                apply_sitk_transform_to_points(
+                    bspline,
+                    apply_affine_numba(M_root_to_page, polygon)
+                )
+            )
+            for class_id, polygon in annotations
+        ]
 
     if args.debug:
         img = cv2.imread(image_path)
