@@ -1,4 +1,4 @@
-from sfrd import align_pages, load_yolo_obb_labels, load_classes, invert_affine_numba, apply_affine_numba
+from sfrd import align_pages, load_yolo_obb_labels, load_classes, invert_affine_numba, apply_affine_numba, apply_sitk_transform_to_points
 from nafhtr import *
 import argparse
 import torch
@@ -551,16 +551,6 @@ def init_worker(annotation_directory):
 
     GLOBAL_CLASSES = load_classes(
         Path(annotation_directory) / "classes.txt"
-    )
-
-def apply_sitk_transform_to_points(transform, points):
-    points = np.asarray(points, dtype=np.float64)
-    if transform is None:  # do not apply transform if it doesn't exist
-        return points
-
-    return np.asarray(
-        [transform.TransformPoint((float(x), float(y))) for x, y in points],
-        dtype=np.float64,
     )
 
 def process_single_image(worker_args):

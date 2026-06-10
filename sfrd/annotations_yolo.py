@@ -5,6 +5,7 @@ import colorsys
 import unicodedata
 
 from .transforms import apply_affine_numba, invert_affine_numba
+from .feats import apply_sitk_transform_to_points
 from .config import config
 
 
@@ -106,7 +107,7 @@ def transform_yolo_obb_to_pages(
 
     output_pages = {}
 
-    for page_idx, (root_idx, M_full, inlier_count, page_path, reprojection_error) in T_q.items():
+    for page_idx, (root_idx, M_full, inlier_count, page_path, reprojection_error, bspline) in T_q.items():
         img_path = all_images[page_idx]
 
         # find corresponding root label file
@@ -134,6 +135,10 @@ def transform_yolo_obb_to_pages(
 
         for class_id, poly in objects:
             poly_t = apply_affine_numba(M_root_to_page, poly)
+            poly_t = apply_sitk_transform_to_points(
+                bspline,
+                poly_t
+            )
 
             transformed_polygons.append(poly_t)
 

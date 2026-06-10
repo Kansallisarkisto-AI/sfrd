@@ -296,6 +296,38 @@ def bspline_mesh_by_short_side(width, height, short_side_cells):
     return [max(1, int(mx)), max(1, int(my))]
 
 # GRID
+
+def displacement_stats(transform, width, height, n=20):
+    xs = np.linspace(0, width - 1, n)
+    ys = np.linspace(0, height - 1, n)
+
+    mags = []
+
+    for y in ys:
+        for x in xs:
+            tx, ty = transform.TransformPoint((float(x), float(y)))
+
+            dx = tx - x
+            dy = ty - y
+
+            mags.append(np.hypot(dx, dy))
+
+    mags = np.asarray(mags)
+
+    print("mean disp:", mags.mean())
+    print("median   :", np.median(mags))
+    print("max disp :", mags.max())
+
+def apply_sitk_transform_to_points(transform, points):
+    points = np.asarray(points, dtype=np.float64)
+    if transform is None:  # do not apply transform if it doesn't exist
+        return points
+
+    return np.asarray(
+        [transform.TransformPoint((float(x), float(y))) for x, y in points],
+        dtype=np.float64,
+    )
+
 def fullscale_bsplinegrid_from_landmarks(page, page_idx, M_full, page_scale, root_scale, fi, kpnode_to_lm, lm_canon,
                                          order=3):
     """
@@ -363,8 +395,16 @@ def fullscale_bsplinegrid_from_landmarks(page, page_idx, M_full, page_scale, roo
 
     mesh_size = bspline_mesh_by_short_side(w, h, config["bspline"]["cells_on_shorter_side"])
 
-    landmark_initializer.SetMovingLandmarks(moving_pts.ravel().tolist())
-    landmark_initializer.SetFixedLandmarks(fixed_pts.ravel().tolist())
+    # From docs at https://simpleitk.readthedocs.io/en/master/registrationOverview.html
+    # The goal of registration is to estimate the transformation which maps points from one
+    # image to the corresponding points in another image. The transformation estimated via
+    # registration is said to map points from the fixed image coordinate system to
+    # the moving image coordinate system.
+
+    # THEREFORE, we need to swap the landmarks here, so that we get a transformation
+    # from the moving image (root) to the fixed image
+    landmark_initializer.SetMovingLandmarks(fixed_pts.ravel().tolist())
+    landmark_initializer.SetFixedLandmarks(moving_pts.ravel().tolist())
 
     transform = sitk.BSplineTransformInitializer(
         fixed_image,
@@ -383,5 +423,28 @@ def fullscale_bsplinegrid_from_landmarks(page, page_idx, M_full, page_scale, roo
 
     # Compute the landmark-fitted BSpline transform.
     output_transform = landmark_initializer.Execute(transform)
+
+    if config["debug"]["enabled"]:
+        displacement_stats(output_transform, w, h)
+
+        before = np.linalg.norm(
+            fixed_pts - moving_pts,
+            axis=1
+        )
+
+        warped = np.array([
+            output_transform.TransformPoint(tuple(p))
+            for p in moving_pts
+        ])
+
+        after = np.linalg.norm(
+            fixed_pts - warped,
+            axis=1
+        )
+
+        print("Before mean:", before.mean())
+        print("After mean :", after.mean())
+        print("Reduction  :", before.mean() - after.mean())
+        print("Ratio      :", before.mean() / after.mean())
 
     return output_transform

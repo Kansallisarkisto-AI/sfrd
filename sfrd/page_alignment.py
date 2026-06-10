@@ -765,7 +765,7 @@ def align_pages(
             pagepath = all_images[pageidx]
             if config["debug"]["enabled"]:
                 shutil.copy2(str(pagepath), str(
-                    Path("unaligned") / Path(pagepath.name)))
+                    Path("unaligned") / Path(pagepath).name))
             
             unaligned.append(pagepath)
 
