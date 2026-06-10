@@ -7,6 +7,7 @@ name = "sfrd"
 version = "0.1"
 dependencies = [
   "opencv-python-headless>=4.10",
+  "opencv-contrib-python-headless>=4.10",
   "numpy>=2",
   "numba>=0.64.0",
   "pillow>=12.1.1",
