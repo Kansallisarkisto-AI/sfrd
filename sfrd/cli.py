@@ -553,6 +553,15 @@ def init_worker(annotation_directory):
         Path(annotation_directory) / "classes.txt"
     )
 
+def apply_sitk_transform_to_points(transform, points):
+    points = np.asarray(points, dtype=np.float64)
+    if transform is None:  # do not apply transform if it doesn't exist
+        return points
+
+    return np.asarray(
+        [transform.TransformPoint((float(x), float(y))) for x, y in points],
+        dtype=np.float64,
+    )
 
 def process_single_image(worker_args):
     """
@@ -666,10 +675,18 @@ def process_single_image(worker_args):
         alignment_result["transformation_to_root"]
     )
 
+    bspline = alignment_result["bspline_transformation_post"]
+
+    # TRANSFORM ANNOTATION POLYGONS
+    # first apply affine transformation from root to page,
+    # then apply B-Spline transformation (in page coordinates, nothing happens if it is None)
     annotations = [
         (
             class_id,
-            apply_affine_numba(M_root_to_page, polygon)
+            apply_sitk_transform_to_points(
+                bspline,
+                apply_affine_numba(M_root_to_page, polygon)
+            )
         )
         for class_id, polygon in annotations
     ]

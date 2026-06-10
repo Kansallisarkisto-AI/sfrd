@@ -41,6 +41,10 @@ min_matches = 30
 max_iters = 5000
 confidence = 0.999
 
+[bspline]
+enabled = true
+cells_on_shorter_side = 4
+
 [page_alignment]
 # minimum number of pages with a transform to root for track to be considered valid
 min_support = 3

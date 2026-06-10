@@ -3,12 +3,16 @@ import numpy as np
 import copy
 import math
 
-from .transforms import apply_affine_numba
+import SimpleITK as sitk
+
+from .transforms import apply_affine_numba, invert_affine_numba
 from .config import config
 
 FLANN_INDEX_KDTREE = 1
 # 1 thread for now because we use multiprocessing elsewhere
 cv2.setNumThreads(1)
+
+sitk.ProcessObject.SetGlobalDefaultNumberOfThreads(1)
 
 
 class SIFTFeatures:
@@ -280,3 +284,104 @@ def affine_is_valid(M,
         return False
 
     return True
+
+def bspline_mesh_by_short_side(width, height, short_side_cells):
+    if width <= height:
+        mx = short_side_cells
+        my = round(short_side_cells * height / width)
+    else:
+        my = short_side_cells
+        mx = round(short_side_cells * width / height)
+
+    return [max(1, int(mx)), max(1, int(my))]
+
+# GRID
+def fullscale_bsplinegrid_from_landmarks(page, page_idx, M_full, page_scale, root_scale, fi, kpnode_to_lm, lm_canon,
+                                         order=3):
+    """
+    Estimate a B-spline grid transformation using correspondences between page keypoints and root canonical keypoints.
+    Transformation is calculated from root to page, in current page coordinate system instead of the root's coordinate system.
+    That is because the B-spline transformation will be applied as a post-correction _after_ the root annotation 
+    has been converted to the page coordinate sytem (with the inverse affine transformation).
+    Here we use all keypoints (not only inliers), since we are trying to correct for the small-scale deformations
+    which might mean points that are not inliers after the simpler RANSAC/affine fit. Hopefully any erraneous matches
+    won't affect the estimation too much or the errors will balance out.
+
+        Returns None if estimation fails.
+    """
+    root_landmarks = [] # in page coordinate system (not in the root's coordinate system!)
+    page_landmarks = [] # in page coordinate system
+    for kpidx, kp in enumerate(fi.keypoints):
+        lm = kpnode_to_lm.get((page_idx, kpidx))
+        if lm is None:
+            continue
+        canon = lm_canon.get(lm)
+        if canon is None:
+            continue
+        
+        # Landmarks' (X, Y) pairs are flattened into 1-d lists.
+        # kp[0] = kp.pt, keypoint location in image
+        page_landmarks.append((kp[0][0] / page_scale, kp[0][1] / page_scale))  # scale into fullres
+        # canon keypoint location (in root frame)
+        root_landmarks.append((float(canon[0]) / root_scale, float(canon[1]) / root_scale))  # scale into fullres
+    
+    
+    M_root_to_page_full = invert_affine_numba(M_full)
+
+    root_landmarks_array = np.asarray(root_landmarks, dtype=np.float64)
+    root_pts_in_page = apply_affine_numba(
+        M_root_to_page_full,
+        root_landmarks_array,
+    )
+
+    # Set up the LandmarkBasedTransformInitializerFilter.
+    landmark_initializer = sitk.LandmarkBasedTransformInitializerFilter()
+    
+    img = sitk.ReadImage(str(page))
+    w, h = img.GetSize()
+
+    fixed_image = sitk.Image(w, h, sitk.sitkFloat32)
+    fixed_image.SetOrigin((0.0, 0.0))
+    fixed_image.SetSpacing((1.0, 1.0))
+    fixed_image.SetDirection((1.0, 0.0, 0.0, 1.0))
+
+    landmark_initializer.SetReferenceImage(fixed_image)
+
+    fixed_pts = np.asarray(page_landmarks, dtype=np.float64).reshape(-1, 2)
+    moving_pts = np.asarray(root_pts_in_page, dtype=np.float64).reshape(-1, 2)
+
+    # ensure landmarks stay inside fixed image domain
+    mask = (
+        (fixed_pts[:, 0] >= 0) & (fixed_pts[:, 0] < w) &
+        (fixed_pts[:, 1] >= 0) & (fixed_pts[:, 1] < h) &
+        (moving_pts[:, 0] >= 0) & (moving_pts[:, 0] < w) &
+        (moving_pts[:, 1] >= 0) & (moving_pts[:, 1] < h)
+    )
+
+    fixed_pts = fixed_pts[mask]
+    moving_pts = moving_pts[mask]
+
+    mesh_size = bspline_mesh_by_short_side(w, h, config["bspline"]["cells_on_shorter_side"])
+
+    landmark_initializer.SetMovingLandmarks(moving_pts.ravel().tolist())
+    landmark_initializer.SetFixedLandmarks(fixed_pts.ravel().tolist())
+
+    transform = sitk.BSplineTransformInitializer(
+        fixed_image,
+        transformDomainMeshSize=mesh_size,
+        order=order
+    )
+
+    if config["debug"]["enabled"]:
+        print(f"Landmarks for B-Spline: {fixed_pts.shape[0]}")
+
+    if fixed_pts.shape[0] < transform.GetNumberOfParameters():
+        print("Not enough matches for B-Spline fit! Need at least as many landmarks as number of parameters"
+        " in B-Spline mesh (this equals a 2x parameter count margin since each landmark has x and y)" \
+        "\nTry decreasing B-Spline cells_on_shorter_side or disabling B-Splines.")
+        return None
+
+    # Compute the landmark-fitted BSpline transform.
+    output_transform = landmark_initializer.Execute(transform)
+
+    return output_transform

@@ -11,7 +11,7 @@ import time
 from sklearn.neighbors import NearestNeighbors
 
 from .ioutils import read_image_cv
-from .feats import SIFTMatcher, SIFTFeatures, SIFTFeaturesCopy, affine_is_valid, estimate_affine_from_landmarks
+from .feats import SIFTMatcher, SIFTFeatures, SIFTFeaturesCopy, affine_is_valid, estimate_affine_from_landmarks, fullscale_bsplinegrid_from_landmarks
 from .graph import propagate_transforms_multi_source_dijkstra_numba
 from .graph import build_tracks_and_canonical
 from .transforms import lift_affine_to_fullres
@@ -555,12 +555,20 @@ def _align_worker(page_idx):
         s_ref=_final_s_root_small,
     )
 
+    if config["bspline"]["enabled"]:
+        bspline_transformation = fullscale_bsplinegrid_from_landmarks(page, page_idx, M_full,
+                                                s_mov_small, _final_s_root_small,
+                                                fi, _final_kpnode_to_lm, _final_lm_canon)
+    else:
+        bspline_transformation = None
+
     return page_idx, (
         _final_root_index,
         M_full,
         inlier_count,
         page,
         mean_residual,
+        bspline_transformation
     )
 
 
@@ -763,9 +771,10 @@ def align_pages(
 
     pretty_output_dict = {}
     for id, value in T_q.items():
-        root_index, transformation_to_root, inlier_count, page, mean_residual = value
+        root_index, transformation_to_root, inlier_count, page, mean_residual, bspline = value
         pretty_output_dict[all_images[id]] = {"root_path": all_images[root_index],
                                                "transformation_to_root": transformation_to_root,
+                                               "bspline_transformation_post": bspline,
                                                "inlier_count": inlier_count, "mean_residual": mean_residual}
     return pretty_output_dict, unaligned
 
