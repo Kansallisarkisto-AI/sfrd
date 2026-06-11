@@ -454,6 +454,8 @@ def fullscale_bsplinegrid_from_landmarks(page, page_idx, M_full, page_scale, roo
     return output_transform
 
 def apply_tps(tps, pts, W, H):
+    if tps is None:
+        return pts
     pts = normalize_pts(pts, W, H)
     transformed_pts = tps.transform(torch.tensor(pts, dtype=torch.float32))
     transformed_pts = denormalize_pts(transformed_pts, W, H)
@@ -489,7 +491,7 @@ def fullscale_thinplatespline_from_landmarks(page, page_idx, M_full, page_shape,
     has been converted to the page coordinate sytem (with the inverse affine transformation).
     Here we use all keypoints (not only inliers), since we are trying to correct for the small-scale deformations
     which might mean points that are not inliers after the simpler RANSAC/affine fit. Hopefully any erraneous matches
-    won't affect the estimation too much or the errors will balance out.
+    won't affect the estimation too much or the errors will balance out with regularization.
 
         Returns None if estimation fails.
     """

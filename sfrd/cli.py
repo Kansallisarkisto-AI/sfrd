@@ -41,6 +41,14 @@ def parse_args():
         argparse.Namespace: Parsed command-line arguments.
     """
     parser = argparse.ArgumentParser(description="Run structuralization")
+
+    parser.add_argument(
+        "--config",
+        type=str,
+        default='',
+        help="Path to config file"
+    )
+
     parser.add_argument(
         "--detection_model_path",
         type=str,
@@ -539,7 +547,7 @@ def finalize_blackout_logic_parallel(final_outputs, args):
 GLOBAL_CLASSES = None
 
 
-def init_worker(annotation_directory):
+def init_worker(annotation_directory, config):
     """
     Initialize multiprocessing worker state.
 
@@ -555,6 +563,9 @@ def init_worker(annotation_directory):
     GLOBAL_CLASSES = load_classes(
         Path(annotation_directory) / "classes.txt"
     )
+
+    if config:
+        config.load_config(config)
 
 def process_single_image(worker_args):
     """
@@ -921,6 +932,10 @@ def main():
     """
     args = parse_args()
 
+    if args.config:
+        config.load_config(args.config)
+        print(f"Set custom config {args.config}")
+
     output_dir_path = Path(args.output_directory)
     output_dir_path.mkdir(parents=True, exist_ok=True)
 
@@ -1002,7 +1017,7 @@ def main():
         with ctx.Pool(
             processes=cpu_processes,
             initializer=init_worker,
-            initargs=(args.annotation_directory,),
+            initargs=(args.annotation_directory, args.config),
         ) as pool:
             for result in tqdm(
                 pool.imap_unordered(

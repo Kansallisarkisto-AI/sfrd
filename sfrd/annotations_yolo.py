@@ -3,6 +3,7 @@ import cv2
 from pathlib import Path
 import colorsys
 import unicodedata
+import yaml
 
 from .transforms import apply_affine_numba, invert_affine_numba
 from .feats import apply_sitk_transform_to_points, apply_tps
@@ -10,7 +11,18 @@ from .config import config
 
 
 def load_classes(classes_path):
-    with open(classes_path) as f:
+    with open(classes_path, "r", encoding="utf-8") as f:
+        if classes_path.name.endswith((".yaml", ".yml")):
+            data = yaml.safe_load(f)
+            names = data.get("names", {})
+
+            if isinstance(names, dict):
+                return [names[i] for i in sorted(names)]
+            if isinstance(names, list):
+                return names
+
+            raise ValueError("YAML 'names' must be a dict or list")
+
         return [line.strip() for line in f if line.strip()]
 
 
@@ -94,10 +106,14 @@ def transform_yolo_obb_to_pages(
     output_dir = Path(output_dir)
     output_dir.mkdir(exist_ok=True)
 
-    classes = load_classes(dataset_dir / "classes.txt")
-
-    images_dir = dataset_dir / "images"
-    labels_dir = dataset_dir / "labels"
+    try:  # try with classes.txt first (exported from Label Studio)
+        classes = load_classes(dataset_dir / "classes.txt")
+        images_dir = dataset_dir / "images"
+        labels_dir = dataset_dir / "labels"
+    except:  # try with data.yaml second (exported from CVAT)
+        classes = load_classes(dataset_dir / "data.yaml")
+        images_dir = dataset_dir / "images" / "train"
+        labels_dir = dataset_dir / "labels" / "train"
 
     # map root_idx to label file
     image_name_to_label = {

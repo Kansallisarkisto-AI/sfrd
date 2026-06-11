@@ -544,12 +544,19 @@ def _align_worker(page_idx):
             s_ref=_final_s_root_small,
         )
 
+        if config["thinplate"]["enabled"]:
+            post_transform = {"tps": None, "page_shape": (0,0)}
+        elif config["bspline"]["enabled"]:
+            post_transform = None
+        
+
         return page_idx, (
             _final_root_index,
             M_full,
             0,
             page,
             similarity_to_root,
+            post_transform  # no thinplate or bspline
         )
 
     M_small, inlier_count, mean_residual = estimation_result
@@ -560,17 +567,17 @@ def _align_worker(page_idx):
         s_ref=_final_s_root_small,
     )
 
-    if config["bspline"]["enabled"]:
-        bspline_transformation = fullscale_bsplinegrid_from_landmarks(page, page_idx, M_full,
-                                                s_mov_small, _final_s_root_small,
-                                                fi, _final_kpnode_to_lm, _final_lm_canon)
-    elif config["thinplate"]["enabled"]:
-        bspline_transformation = fullscale_thinplatespline_from_landmarks(page, page_idx, M_full,
+    if config["thinplate"]["enabled"]:
+        post_transform = fullscale_thinplatespline_from_landmarks(page, page_idx, M_full,
                                         page_shape, s_mov_small, _final_s_root_small,
                                         fi, _final_kpnode_to_lm, _final_lm_canon, 
                                         regularization_parameter=config["thinplate"]["regularization_parameter"])
+    elif config["bspline"]["enabled"]:
+        post_transform = fullscale_bsplinegrid_from_landmarks(page, page_idx, M_full,
+                                                s_mov_small, _final_s_root_small,
+                                                fi, _final_kpnode_to_lm, _final_lm_canon)
     else:
-        bspline_transformation = None
+        post_transform = None
 
     return page_idx, (
         _final_root_index,
@@ -578,7 +585,7 @@ def _align_worker(page_idx):
         inlier_count,
         page,
         mean_residual,
-        bspline_transformation
+        post_transform
     )
 
 
@@ -769,6 +776,9 @@ def align_pages(
             output_dir="aligned"
         )
 
+    if config["debug"]["enabled"]:
+        Path("unaligned").mkdir(exist_ok=True)
+    
     unaligned = []
     for pageidx in range(0, n):
         if pageidx >= n_roots and pageidx not in T_q:

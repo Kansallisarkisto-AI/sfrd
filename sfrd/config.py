@@ -40,6 +40,9 @@ class DictProxy:
     # allow changing config at runtime, for testing purposes
     def __setitem__(self, key, value):
         _config[key] = value
+    
+    def load_config(self, path):
+        init_config(path)
 
 
 init_config()

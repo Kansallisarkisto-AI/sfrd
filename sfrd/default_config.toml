@@ -71,4 +71,4 @@ max_scale = 1.2
 max_rotation_deg = 15
 
 [debug]
-enabled = true
+enabled = false

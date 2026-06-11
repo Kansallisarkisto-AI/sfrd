@@ -1,0 +1,39 @@
+[prefiltering]
+# number of nearest neighbors selected in prefiltering (usually 12)
+k = 32
+# number of bytes in pHash, which can be visualized as a square black and white image with a width of sqrt(phash_bytes*8)
+phash_bytes = 32
+# whether to use PCA representation of thumbnail-sized image for prefiltering or to use phash representation
+descriptor = "pca"  # phash | pca
+# downscaled image size for PCA
+pca_image_size = 64
+# maximum number of pca components, value fed into PCA() will be min(len(images)//2, config["prefiltering"]["pca_components"])
+pca_components = 64
+
+[page_alignment]
+# minimum number of pages with a transform to root for track to be considered valid
+min_support = 3
+# downscaled page size used for alignment, in pixels
+max_alignment_dim = 1600
+
+[ransac_graph]
+# maximum offset in pixels for a feature to be considered an inlier
+pixel_threshold = 30.0
+# minimum number of matches to return a valid alignment
+min_matches = 30
+# maximum number of RANSAC iterations, affects speed
+max_iters = 5000
+# minimum confidence level for RANSAC, affects speed
+confidence = 0.999 
+
+[ransac_final]
+# same as above
+pixel_threshold = 30.0
+min_matches = 30
+max_iters = 5000
+confidence = 0.999
+
+# Thin plate spline post-transform with regularization
+[thinplate]
+enabled = true
+regularization_parameter = 0.1  # regularizes, MUST BE > 0.0 to handle duplicate landmarks
