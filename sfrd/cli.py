@@ -647,6 +647,10 @@ def process_single_image(worker_args):
         str(alignment_result["root_path"])
     ).shape[:2]
 
+    img = cv2.imread(image_path)
+
+    h_page, w_page = img.shape[:2]
+
     annotations = load_yolo_obb_labels(
         label_path,
         w_root,
@@ -676,7 +680,7 @@ def process_single_image(worker_args):
         annotations = [
             (
                 class_id,
-                apply_tps(tps, apply_affine_numba(M_root_to_page, polygon).astype(np.float32))
+                apply_tps(tps["tps"], apply_affine_numba(M_root_to_page, polygon).astype(np.float32), tps["page_shape"][1], tps["page_shape"][0])
             )
             for class_id, polygon in annotations
         ]
@@ -698,8 +702,6 @@ def process_single_image(worker_args):
         ]
 
     if args.debug:
-        img = cv2.imread(image_path)
-
         debug_img = draw_debug_overlay(img, ordered_lines)
 
         debug_dir = Path(args.output_directory) / "debug"
@@ -729,6 +731,9 @@ def process_single_image(worker_args):
                     continue
 
                 clipped = clip_line_to_ann_complex(line_poly, ann_poly)
+
+                if len(clipped) < 3:
+                    continue
 
                 class_label = classes[class_id]
 

@@ -3,11 +3,14 @@ import numpy as np
 import copy
 import math
 
-import SimpleITK as sitk
-
 from .transforms import apply_affine_numba, invert_affine_numba
 from .config import config
 from .ioutils import read_image_cv
+
+# B-Spline and TPS fine-grained deformation correction
+import SimpleITK as sitk
+from torch_tps import ThinPlateSpline
+import torch
 
 FLANN_INDEX_KDTREE = 1
 # 1 thread for now because we use multiprocessing elsewhere
@@ -324,10 +327,10 @@ def apply_sitk_transform_to_points(transform, points):
     if transform is None:  # do not apply transform if it doesn't exist
         return points
 
-    return np.asarray(
+    return np.around(np.asarray(
         [transform.TransformPoint((float(x), float(y))) for x, y in points],
         dtype=np.float64,
-    )
+    )).astype(np.int32)
 
 def fullscale_bsplinegrid_from_landmarks(page, page_idx, M_full, page_scale, root_scale, fi, kpnode_to_lm, lm_canon,
                                          order=3):
@@ -450,11 +453,34 @@ def fullscale_bsplinegrid_from_landmarks(page, page_idx, M_full, page_scale, roo
 
     return output_transform
 
-def apply_tps(tps, pts):
-    retval, transformed_pts = tps.applyTransformation(pts)
-    return transformed_pts
+def apply_tps(tps, pts, W, H):
+    pts = normalize_pts(pts, W, H)
+    transformed_pts = tps.transform(torch.tensor(pts, dtype=torch.float32))
+    transformed_pts = denormalize_pts(transformed_pts, W, H)
+    return np.around(transformed_pts.numpy()).astype(np.int32)
 
-def fullscale_thinplatespline_from_landmarks(page, page_idx, M_full, page_scale, root_scale, fi, kpnode_to_lm, lm_canon,
+def normalize_pts(pts, W, H):
+    if isinstance(pts, torch.Tensor):
+        pts = pts.float().clone()
+    else:
+        pts = np.asarray(pts, dtype=np.float32).copy()
+
+    pts[:, 0] = 2 * pts[:, 0] / (W - 1) - 1
+    pts[:, 1] = 2 * pts[:, 1] / (H - 1) - 1
+    return pts
+
+
+def denormalize_pts(pts, W, H):
+    if isinstance(pts, torch.Tensor):
+        pts = pts.float().clone()
+    else:
+        pts = np.asarray(pts, dtype=np.float32).copy()
+
+    pts[:, 0] = (pts[:, 0] + 1) * (W - 1) / 2
+    pts[:, 1] = (pts[:, 1] + 1) * (H - 1) / 2
+    return pts
+
+def fullscale_thinplatespline_from_landmarks(page, page_idx, M_full, page_shape, page_scale, root_scale, fi, kpnode_to_lm, lm_canon,
                                              regularization_parameter=0.05):
     """
     Estimate a thin plate spline (TPS) transformation using correspondences between page keypoints and root canonical keypoints.
@@ -483,9 +509,8 @@ def fullscale_thinplatespline_from_landmarks(page, page_idx, M_full, page_scale,
         # canon keypoint location (in root frame)
         root_landmarks.append((float(canon[0]) / root_scale, float(canon[1]) / root_scale))  # scale into fullres
     
-    root_landmarks = np.asarray(root_landmarks, dtype=np.float32)
-    page_landmarks = np.asarray(page_landmarks, dtype=np.float32)
-
+    #page_landmarks = np.asarray(page_landmarks, dtype=np.float32)
+    page_landmarks = torch.tensor(page_landmarks, dtype=torch.float32)
     M_root_to_page_full = invert_affine_numba(M_full)
 
     root_landmarks_array = np.asarray(root_landmarks, dtype=np.float64)
@@ -495,41 +520,45 @@ def fullscale_thinplatespline_from_landmarks(page, page_idx, M_full, page_scale,
         root_landmarks_array,
     )
 
-    root_landmarks = root_landmarks.reshape(1, -1, 2)
-    page_landmarks = page_landmarks.reshape(1, -1, 2)
+    root_landmarks = torch.tensor(root_landmarks, dtype=torch.float32)
 
-    # create matches
-    n_landmarks = root_landmarks.shape[1]
-    matches = [cv2.DMatch(i, i, 0) for i in range(n_landmarks)]
+    #root_landmarks = root_landmarks.reshape(1, -1, 2)
+    #page_landmarks = page_landmarks.reshape(1, -1, 2)
 
     # Initialize TPS transformer
     tps = cv2.createThinPlateSplineShapeTransformer()
 
-    img = read_image_cv(page)
-    diagonal = math.sqrt(img.shape[0]**2 + img.shape[1]**2)
+    #img = read_image_cv(page)
+    w = page_shape[1] / page_scale  # recover original full-resolution shape
+    h = page_shape[0] / page_scale
+    #diagonal = math.sqrt(img.shape[0]**2 + img.shape[1]**2)
 
-    tps.setRegularizationParameter(regularization_parameter * diagonal)
+    root_landmarks = normalize_pts(root_landmarks, w, h)
+    page_landmarks = normalize_pts(page_landmarks, w, h)
 
-    # Estimate
-    tps.estimateTransformation(root_landmarks, page_landmarks, matches)
+    tps = ThinPlateSpline(alpha=regularization_parameter)
 
+    tps.fit(root_landmarks, page_landmarks)
 
     if config["debug"]["enabled"]:
-        src = root_landmarks.reshape(-1, 2).astype(np.float64)
-        dst = page_landmarks.reshape(-1, 2).astype(np.float64)
+        #src = root_landmarks.reshape(-1, 2).astype(np.float64)
+        #dst = page_landmarks.reshape(-1, 2).astype(np.float64)
+        src = root_landmarks.numpy()
+        dst = page_landmarks.numpy()
 
         print(f"Landmarks for TPS: {src.shape[0]}")
 
         before = np.linalg.norm(dst - src, axis=1)
 
-        warped = apply_tps(tps, root_landmarks)
-        warped = np.asarray(warped, dtype=np.float64).reshape(-1, 2)
+        #warped = apply_tps(tps, root_landmarks)
+        warped = tps.transform(root_landmarks)
+        #warped = np.asarray(warped, dtype=np.float64).reshape(-1, 2)
 
-        after = np.linalg.norm(dst - warped, axis=1)
+        after = np.linalg.norm(dst - warped.numpy(), axis=1)
 
         print("Before mean:", before.mean())
         print("After mean :", after.mean())
         print("Reduction  :", before.mean() - after.mean())
         print("Ratio      :", before.mean() / after.mean() if after.mean() > 0 else np.inf)
 
-    return tps
+    return {"tps": tps, "page_shape" : (h, w)}

@@ -5,7 +5,7 @@ import colorsys
 import unicodedata
 
 from .transforms import apply_affine_numba, invert_affine_numba
-from .feats import apply_sitk_transform_to_points
+from .feats import apply_sitk_transform_to_points, apply_tps
 from .config import config
 
 
@@ -107,8 +107,12 @@ def transform_yolo_obb_to_pages(
 
     output_pages = {}
 
-    for page_idx, (root_idx, M_full, inlier_count, page_path, reprojection_error, bspline) in T_q.items():
+    for page_idx, (root_idx, M_full, inlier_count, page_path, reprojection_error, post_transformation) in T_q.items():
         img_path = all_images[page_idx]
+        if config["thinplate"]["enabled"]:
+            w_page = post_transformation["page_shape"][1]
+            h_page = post_transformation["page_shape"][0]
+
 
         # find corresponding root label file
         root_img_path = all_images[root_idx]
@@ -135,10 +139,14 @@ def transform_yolo_obb_to_pages(
 
         for class_id, poly in objects:
             poly_t = apply_affine_numba(M_root_to_page, poly)
-            poly_t = apply_sitk_transform_to_points(
-                bspline,
-                poly_t
-            )
+
+            if config["thinplate"]["enabled"]:
+                poly_t = apply_tps(post_transformation["tps"], poly_t, w_page, h_page)
+            else:
+                poly_t = apply_sitk_transform_to_points(
+                    post_transformation,
+                    poly_t
+                )
 
             transformed_polygons.append(poly_t)
 
@@ -155,7 +163,6 @@ def transform_yolo_obb_to_pages(
         # optional debug draw
         if config["debug"]["enabled"]:
             img = cv2.imread(str(img_path))
-            
             if img is None:
                 print(f"[WARN] Could not read {img_path}")
                 continue

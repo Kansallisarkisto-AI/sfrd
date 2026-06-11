@@ -519,6 +519,7 @@ def _align_worker(page_idx):
         similarity_to_root = page_ph - _final_root_ph
 
     fi = _final_feats[page_idx][0]
+    page_shape = _final_feats[page_idx][1]
 
     estimation_result = estimate_affine_from_landmarks(
         page_idx,
@@ -565,7 +566,7 @@ def _align_worker(page_idx):
                                                 fi, _final_kpnode_to_lm, _final_lm_canon)
     elif config["thinplate"]["enabled"]:
         bspline_transformation = fullscale_thinplatespline_from_landmarks(page, page_idx, M_full,
-                                        s_mov_small, _final_s_root_small,
+                                        page_shape, s_mov_small, _final_s_root_small,
                                         fi, _final_kpnode_to_lm, _final_lm_canon, 
                                         regularization_parameter=config["thinplate"]["regularization_parameter"])
     else:

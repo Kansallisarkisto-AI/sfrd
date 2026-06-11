@@ -63,6 +63,8 @@ def draw_debug_overlay(image, regions, alpha=0.4):
 
         for poly, label in zip(lines, labels):
             pts = poly.astype(np.int32)
+            if len(pts) < 3:
+                continue
 
             # random-ish but deterministic color per label
             digest = hashlib.md5(label.encode()).digest()

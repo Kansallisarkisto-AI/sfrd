@@ -44,7 +44,7 @@ confidence = 0.999
 # Thin plate spline post-transform with regularization
 [thinplate]
 enabled = true
-regularization_parameter = 0.05  # regularizes
+regularization_parameter = 0.05  # regularizes, MUST BE > 0.0 to handle duplicate landmarks
 
 # alternative to thinplate, will only be enabled if thinplate is not enabled
 [bspline]
