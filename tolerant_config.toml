@@ -18,9 +18,9 @@ max_alignment_dim = 1600
 
 [ransac_graph]
 # maximum offset in pixels for a feature to be considered an inlier
-pixel_threshold = 30.0
+pixel_threshold = 5.0
 # minimum number of matches to return a valid alignment
-min_matches = 30
+min_matches = 60
 # maximum number of RANSAC iterations, affects speed
 max_iters = 5000
 # minimum confidence level for RANSAC, affects speed
@@ -28,7 +28,7 @@ confidence = 0.999
 
 [ransac_final]
 # same as above
-pixel_threshold = 30.0
+pixel_threshold = 5.0
 min_matches = 30
 max_iters = 5000
 confidence = 0.999
@@ -36,4 +36,7 @@ confidence = 0.999
 # Thin plate spline post-transform with regularization
 [thinplate]
 enabled = true
-regularization_parameter = 0.1  # regularizes, MUST BE > 0.0 to handle duplicate landmarks
+regularization_parameter = 0.025  # regularizes, MUST BE > 0.0 to handle duplicate landmarks, can be e.g. 0.05
+
+[debug]
+enabled = true
