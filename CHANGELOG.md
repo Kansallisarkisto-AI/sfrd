@@ -1,4 +1,29 @@
 # Changelog
 
 All _major_ changes to this project will be documented in this file.
-Format has not been decided.
+
+The project currently uses date-based versioning. Version numbers may be introduced in the future.
+
+## 2026-06-12
+
+### Added
+- Added fine-grained deformation correction based on thin plate splines (TPS)
+- Improved config loading and made more tolerant config for deformed materials
+
+### Changed
+- Modified changelog format.
+
+### Fixed
+- N/A
+
+## 2026-05-22
+
+### Added
+- Initial project structure.
+- Basic configuration and documentation.
+
+### Changed
+- N/A
+
+### Fixed
+- N/A
