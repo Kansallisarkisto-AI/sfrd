@@ -258,20 +258,29 @@ def layout_table_nms(boxes, ios_threshold=0.5):
 
 layout_model = create_model(model_name="PP-DocLayout_plus-L")
 
-detection_model = AutoDetectionModel.from_pretrained(
-    model_type="huggingface",
-    model_path="PaddlePaddle/RT-DETR-L_wireless_table_cell_det_safetensors",
-    confidence_threshold=0.3,
-    image_size=640,
-    device="cpu",  # Change to "cuda" when available.
-)
 
 class PaddleDetectionFunction:
     def __init__(
         self,
+        wired=True,
         **kwargs
     ) -> None:
-        pass
+        self.wired = wired
+
+        if self.wired:
+            model_path = "PaddlePaddle/RT-DETR-L_wired_table_cell_det_safetensors"
+            print("Wired model")
+        else:
+            model_path = "PaddlePaddle/RT-DETR-L_wireless_table_cell_det_safetensors"
+            print("Wireless model")
+        
+        self.detection_model = AutoDetectionModel.from_pretrained(
+            model_type="huggingface",
+            model_path=model_path,
+            confidence_threshold=0.3,
+            image_size=640,
+            device="cpu",  # Change to "cuda" when available.
+        )
 
     @property
     def spec(self) -> cvataa.DetectionFunctionSpec:
@@ -377,7 +386,7 @@ class PaddleDetectionFunction:
             # coordinates relative to `table_crop`.
             crop_result = get_sliced_prediction(
                 table_crop,
-                detection_model,
+                self.detection_model,
                 slice_height=min(MAX_SLICE_HEIGHT, crop_h),
                 slice_width=min(MAX_SLICE_WIDTH, crop_w),
                 overlap_height_ratio=0.2,
