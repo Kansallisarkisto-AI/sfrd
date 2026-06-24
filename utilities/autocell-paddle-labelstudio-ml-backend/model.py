@@ -271,11 +271,11 @@ wired_predictor = TableCellPredictor(
     device="cpu",  # change to "cuda" if available
 )
 
-'''wireless_predictor = TableCellPredictor(
+wireless_predictor = TableCellPredictor(
     wired=False,
     confidence_threshold=0.3,
     device="cpu",  # change to "cuda" if available
-)'''
+)
 
 class NewModel(LabelStudioMLBase):
     def setup(self):
@@ -286,6 +286,7 @@ class NewModel(LabelStudioMLBase):
             confidence_threshold=0.3,
             device="cpu",  # change to "cuda" if available
         )'''
+
         self.predictor = wired_predictor
 
     def _get_label_studio_names(self):
@@ -317,6 +318,14 @@ class NewModel(LabelStudioMLBase):
         print(f"Layout threshold: {layout_threshold}")
         cell_threshold = extra_params.get("cell_threshold", 0.3)
         print(f"Cell threshold: {cell_threshold}")
+
+        self.is_wireless = extra_params.get("wireless", False)
+        if self.is_wireless:
+            self.predictor = wireless_predictor
+            print("Using wireless predictor")
+        else:
+            self.predictor = wired_predictor
+            print("Using wired predictor")
 
         for task in tasks:
             image_url = task["data"][data_key]
