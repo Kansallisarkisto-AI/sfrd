@@ -166,16 +166,18 @@ class TableCellPredictor:
         self.layout_model = create_model(model_name="PP-DocLayout_plus-L")
         self.orderer = GraphBasedOrdering(text_direction="lr")
 
-    def predict(self, image: Image.Image):
+    def predict(self, image: Image.Image, layout_threshold, cell_threshold):
         original_rgb = np.asarray(image.convert("RGB"))
         image_height, image_width = original_rgb.shape[:2]
+
+        self.detection_model.confidence_threshold = cell_threshold
 
         layout_result = next(
             self.layout_model.predict(
                 original_rgb,
                 batch_size=1,
                 layout_nms=True,
-                threshold=0.3,
+                threshold=layout_threshold,
             )
         )
 
@@ -307,13 +309,22 @@ class NewModel(LabelStudioMLBase):
         data_key = "image"
         predictions = []
 
+        extra_params = self.extra_params
+        if not extra_params:
+            extra_params = {}
+        
+        layout_threshold = extra_params.get("layout_threshold", 0.3)
+        print(f"Layout threshold: {layout_threshold}")
+        cell_threshold = extra_params.get("cell_threshold", 0.3)
+        print(f"Cell threshold: {cell_threshold}")
+
         for task in tasks:
             image_url = task["data"][data_key]
             image_path = self.get_local_path(image_url, task_id=task.get("id"))
 
             with Image.open(image_path) as image:
                 image_width, image_height = image.size
-                cells = self.predictor.predict(image)
+                cells = self.predictor.predict(image, layout_threshold, cell_threshold)
 
             results = [
                 ls_rectangle_result(
