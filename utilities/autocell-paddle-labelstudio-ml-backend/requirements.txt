@@ -1,0 +1,7 @@
+paddlepaddle==3.2.2
+paddlex
+sahi
+Pillow
+transformers
+pypdfium2
+opencv-contrib-python
