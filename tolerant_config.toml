@@ -39,4 +39,4 @@ enabled = true
 regularization_parameter = 0.025  # regularizes, MUST BE > 0.0 to handle duplicate landmarks, can be e.g. 0.05
 
 [debug]
-enabled = true
+enabled = false

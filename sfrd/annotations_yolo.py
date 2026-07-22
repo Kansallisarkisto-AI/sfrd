@@ -26,7 +26,7 @@ def load_classes(classes_path):
         return [line.strip() for line in f if line.strip()]
 
 
-def load_yolo_obb_labels(label_path, img_w, img_h):
+def load_yolo_obb_labels_old(label_path, img_w, img_h):
     """
     Returns list of (class_id, polygon[4x2]) in PIXEL coords
     """
@@ -54,6 +54,44 @@ def load_yolo_obb_labels(label_path, img_w, img_h):
             objects.append((class_id, poly))
 
     return objects
+
+def load_yolo_obb_labels(label_path, img_w, img_h):
+    """
+    Returns list of (class_ids, polygon[4x2]) in PIXEL coords,
+    where class_ids is a list for polygons with multiple labels.
+    """
+    objects_by_poly = {}
+
+    if not label_path.exists():
+        raise IOError(f"Label path does not exist: {label_path}")
+
+    with open(label_path) as f:
+        for line in f:
+            parts = line.strip().split()
+            if len(parts) != 9:
+                raise ValueError(f"Number of items per line differs from 9,\
+                                  is the file in YOLOv8-OBB format?\nLabel path: {label_path}")
+
+            class_id = int(parts[0])
+
+            coords = np.array(list(map(float, parts[1:])), dtype=np.float64)
+            poly = coords.reshape(4, 2)
+
+            # ---- denormalize ----
+            poly[:, 0] *= img_w
+            poly[:, 1] *= img_h
+
+            key = tuple(poly.ravel())
+
+            if key not in objects_by_poly:
+                objects_by_poly[key] = ([], poly)
+
+            objects_by_poly[key][0].append(class_id)
+
+    return [
+        (sorted(class_ids), poly)
+        for class_ids, poly in objects_by_poly.values()
+    ]
 
 
 def to_ascii(text):
@@ -153,7 +191,7 @@ def transform_yolo_obb_to_pages(
         labels = []
         colors = []
 
-        for class_id, poly in objects:
+        for class_ids, poly in objects:
             poly_t = apply_affine_numba(M_root_to_page, poly)
 
             if config["thinplate"]["enabled"]:
@@ -166,14 +204,14 @@ def transform_yolo_obb_to_pages(
 
             transformed_polygons.append(poly_t)
 
-            # label text
-            if class_id < len(classes):
-                label = classes[class_id]
-            else:
-                label = str(class_id)
+            # Class IDs are sorted, matching load_classes() order.
+            label = "->".join(
+                classes[class_id] if class_id < len(classes) else str(class_id)
+                for class_id in class_ids
+            )
 
             labels.append(label)
-            colors.append(color_from_id(class_id))
+            colors.append(color_from_id(class_ids[0]))
 
         
         # optional debug draw

@@ -142,7 +142,10 @@ def parse_args():
         default=8,
         help="Batch size for text recognition"
     )
-    parser.add_argument("--disregard_regions", action="store_true")
+    parser.add_argument("--disregard_regions", action="store_true",
+                        help="Do not use segmentation model for text regions")
+    parser.add_argument("--disregard_lines", action="store_true", 
+                        help="Do not use segmentation model for text lines (or at all if also disregarding regions)")
     parser.add_argument(
         "--debug",
         action="store_true",
@@ -547,7 +550,7 @@ def finalize_blackout_logic_parallel(final_outputs, args):
 GLOBAL_CLASSES = None
 
 
-def init_worker(annotation_directory, config):
+def init_worker(annotation_directory, config_file):
     """
     Initialize multiprocessing worker state.
 
@@ -564,8 +567,8 @@ def init_worker(annotation_directory, config):
         Path(annotation_directory) / "classes.txt"
     )
 
-    if config:
-        config.load_config(config)
+    if config_file:
+        config.load_config(config_file)
 
 def process_single_image(worker_args):
     """
@@ -606,19 +609,30 @@ def process_single_image(worker_args):
     final_outputs = {}
     final_label_orders = {}
 
-    line_polygons, line_confs, line_max_mins, region_polygons, \
-        region_confs, region_max_mins, image_shape = run_gpu_task(
-            gpu_task_queue,
-            gpu_results,
-            gpu_slots,
-            "predict_polygons",
-            {"image_path": image_path})
+    if args.disregard_regions and args.disregard_lines:
+        # create dummy line preds if we disregard all segmentation predictions
+        line_preds = {
+            'coords': [],
+            'max_min': [],
+            'confs': []
+        }
+        region_polygons = []
+        image_shape = cv2.imread(image_path).shape[0:2]
+    else:
+        # predict regions and lines normally using segmentation model
+        line_polygons, line_confs, line_max_mins, region_polygons, \
+            region_confs, region_max_mins, image_shape = run_gpu_task(
+                gpu_task_queue,
+                gpu_results,
+                gpu_slots,
+                "predict_polygons",
+                {"image_path": image_path})
 
-    line_preds = {
-        'coords': line_polygons,
-        'max_min': line_max_mins,
-        'confs': line_confs
-    }
+        line_preds = {
+            'coords': line_polygons,
+            'max_min': line_max_mins,
+            'confs': line_confs
+        }
 
     if len(region_polygons) > 0 and not args.disregard_regions:
         region_preds = []
@@ -634,19 +648,21 @@ def process_single_image(worker_args):
                 'img_shape': image_shape,
                 'conf': region_conf
             })
-
     else:
         region_preds = get_default_region(image_shape=image_shape)
 
-    lines_connected_to_regions = get_line_regions(
-        lines=line_preds,
-        regions=region_preds
-    )
+    if not args.disregard_lines:
+        lines_connected_to_regions = get_line_regions(
+            lines=line_preds,
+            regions=region_preds
+        )
 
-    ordered_lines = order_regions_lines(
-        lines=lines_connected_to_regions,
-        regions=region_preds
-    )
+        ordered_lines = order_regions_lines(
+            lines=lines_connected_to_regions,
+            regions=region_preds
+        )
+    else:
+        ordered_lines = region_preds
 
     label_path = (
         Path(args.annotation_directory)
@@ -671,13 +687,19 @@ def process_single_image(worker_args):
     annotation_label_order = []
     seen = set()
 
-    for class_id, _ in annotations:
-        label = classes[class_id]
+    annotations2 = []
+
+    for class_ids, poly in annotations:
+        label = "->".join(classes[class_id] if class_id < len(classes) else str(class_id) for class_id in class_ids)
+
+        annotations2.append((class_ids, label, poly))
 
         if label not in seen:
             annotation_label_order.append(label)
             annotation_label_order.append("CONF_" + label)
             seen.add(label)
+    
+    annotations = annotations2
 
     M_root_to_page = invert_affine_numba(
         alignment_result["transformation_to_root"]
@@ -690,10 +712,11 @@ def process_single_image(worker_args):
         # then apply B-Spline transformation (in page coordinates, nothing happens if it is None)
         annotations = [
             (
-                class_id,
+                class_ids,
+                label,
                 apply_tps(tps["tps"], apply_affine_numba(M_root_to_page, polygon).astype(np.float32), tps["page_shape"][1], tps["page_shape"][0])
             )
-            for class_id, polygon in annotations
+            for class_ids, label, polygon in annotations
         ]
     else:
         bspline = alignment_result["post_transformation"]
@@ -703,13 +726,14 @@ def process_single_image(worker_args):
         # then apply B-Spline transformation (in page coordinates, nothing happens if it is None)
         annotations = [
             (
-                class_id,
+                class_ids,
+                label,
                 apply_sitk_transform_to_points(
                     bspline,
                     apply_affine_numba(M_root_to_page, polygon)
                 )
             )
-            for class_id, polygon in annotations
+            for class_ids, label, polygon in annotations
         ]
 
     if args.debug:
@@ -729,28 +753,31 @@ def process_single_image(worker_args):
         new_line_labels = []
         new_confs = []
 
-        for class_id, ann_poly in annotations:
-            for line_index, line_poly in enumerate(region['lines']):
-                score = line_overlap_score(
-                    line_poly,
-                    ann_poly,
-                    line_relative_threshold=args.association_overlap_threshold,
-                    ann_relative_threshold=args.association_overlap_threshold,
-                )
-
-                if score < args.association_overlap_threshold:
-                    continue
-
-                clipped = clip_line_to_ann_complex(line_poly, ann_poly)
-
-                if len(clipped) < 3:
-                    continue
-
-                class_label = classes[class_id]
-
-                new_lines.append(clipped)
+        for class_ids, class_label, ann_poly in annotations:
+            if args.disregard_lines:
+                new_lines.append(ann_poly)
                 new_line_labels.append(class_label)
-                new_confs.append(region['line_confs'][line_index])
+                new_confs.append(1.0)
+            else:
+                for line_index, line_poly in enumerate(region['lines']):
+                    score = line_overlap_score(
+                        line_poly,
+                        ann_poly,
+                        line_relative_threshold=args.association_overlap_threshold,
+                        ann_relative_threshold=args.association_overlap_threshold,
+                    )
+
+                    if score < args.association_overlap_threshold:
+                        continue
+
+                    clipped = clip_line_to_ann_complex(line_poly, ann_poly)
+
+                    if len(clipped) < 3:
+                        continue
+
+                    new_lines.append(clipped)
+                    new_line_labels.append(class_label)
+                    new_confs.append(region['line_confs'][line_index])
 
         region['lines'] = new_lines
         region['line_labels'] = new_line_labels
@@ -843,10 +870,7 @@ def process_single_image(worker_args):
         gray = cv2.cvtColor(img, cv2.COLOR_BGR2GRAY)
         thresh = threshold_otsu(gray)
 
-        for class_id, poly in annotations:
-
-            label = classes[class_id]
-
+        for class_ids, label, poly in annotations:
             if not (
                 label.startswith("||")
                 or label.startswith("__")
