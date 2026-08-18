@@ -28,6 +28,8 @@ import traceback
 import psutil
 
 from .cli_helpers import *
+from .boxfit import fit_middle_axis_aligned_box, build_cost_image, \
+                    solve, cells_to_polygons
 from skimage.filters import threshold_otsu
 
 # disable opencv threading because we are using multiprocessing
@@ -60,6 +62,12 @@ def parse_args():
         type=str,
         default='/path/to/trocr/model/folder/',
         help="Path to the recognition model folder"
+    )
+    parser.add_argument(
+        "--recognition_model_revision",
+        type=str,
+        default='main',
+        help="Recognition model revision"
     )
     parser.add_argument(
         "--input_directory",
@@ -166,6 +174,19 @@ def parse_args():
     )
 
     parser.add_argument(
+        "--refit_boundaries",
+        action="store_true",
+        help="Whether to refit cell/line boundaries, avoiding high-frequency content (e.g. written text) at cell boundaries."
+    )
+
+    parser.add_argument(
+        "--refit_scale",
+        type=int,
+        default=4,
+        help="Downscaling factor for refit_boundaries"
+    )
+
+    parser.add_argument(
         "--process_only",
         action="store_true",
         help="Process only (with GPU, after alignment), store in output directory."
@@ -210,6 +231,27 @@ def parse_args():
         type=int,
         default=1,
         help="Number of GPU workers per GPU"
+    )
+
+    parser.add_argument(
+        "--segmentation_tilesize",
+        type=int,
+        default=0,
+        help="Tile size for segmentation (e.g. 768px), 0 to disable"
+    )
+
+    parser.add_argument(
+        "--segmentation_tileoverlap",
+        type=int,
+        default=128,
+        help="Tile overlap for segmentation (e.g. 128px), 0 to disable"
+    )
+
+    parser.add_argument(
+        "--segmentation_overallsize",
+        type=int,
+        default=768,
+        help="Overall size of image fed into segmentation (when tiling, _subtract_ segmentation_tileoverlap)"
     )
 
     return parser.parse_args()
@@ -320,6 +362,7 @@ def gpu_worker_loop(args, rank, gpu_task_queue, gpu_results):
         args.recognition_model_path,
         args.recognition_model_path,
         device=device_string,
+        revision=args.recognition_model_revision
     )
 
     print(f"Loading {device_string}")
@@ -339,7 +382,7 @@ def gpu_worker_loop(args, rank, gpu_task_queue, gpu_results):
                 result = predict_polygons(
                     detection_model,
                     image_path,
-                    max_size=768,
+                    max_size=args.segmentation_overallsize,
                     confidence_threshold=args.confidence_threshold,
                     line_percentage_threshold=args.line_percentage_threshold,
                     region_percentage_threshold=args.region_percentage_threshold,
@@ -347,6 +390,8 @@ def gpu_worker_loop(args, rank, gpu_task_queue, gpu_results):
                     region_iou=args.region_iou,
                     line_overlap_threshold=args.line_overlap_threshold,
                     region_overlap_threshold=args.region_overlap_threshold,
+                    tile_size=args.segmentation_tilesize,
+                    tile_overlap=args.segmentation_tileoverlap
                 )
 
             elif kind == "get_text_predictions":
@@ -421,6 +466,8 @@ def run_gpu_task(gpu_task_queue, gpu_results, gpu_slots, kind, payload):
     finally:
         gpu_slots.release()
 
+def round_polygon(poly):
+    return [round(x) for x in poly]
 
 def merge_results_parallel(results):
     """Merge outputs from parallel worker processes.
@@ -569,6 +616,11 @@ def init_worker(annotation_directory, config_file):
 
     if config_file:
         config.load_config(config_file)
+
+def refit_lines(ordered_lines):
+    boxes = []
+
+
 
 def process_single_image(worker_args):
     """
@@ -783,8 +835,31 @@ def process_single_image(worker_args):
         region['line_labels'] = new_line_labels
         region['line_confs'] = new_confs
 
+    if args.refit_boundaries:
+        cost_image = build_cost_image(cv2.cvtColor(img, cv2.COLOR_BGR2GRAY), 
+                                      downscale=args.refit_scale,
+                                      peak=config['refit_boundaries']['peak'])
+
+        for region in ordered_lines:
+            # create integer-coordinate representative middle-of-side boxes
+            boxes = [round_polygon(fit_middle_axis_aligned_box(x)) for x in region['lines']]
+            #print(boxes)
+            new_boxes, refit_info = solve(boxes, cost_image, cost_downscale=args.refit_scale,
+                                          solve_downscale=args.refit_scale,
+                                          workers=config['refit_boundaries']['workers'], 
+                                          w_dev=config['refit_boundaries']['w_dev'],
+                                          w_dev_grow=config['refit_boundaries']['w_dev_grow'],
+                                          max_expand=config['refit_boundaries']['max_expand'],
+                                          max_push=config['refit_boundaries']['max_push'],
+                                          min_size=config['refit_boundaries']['min_size'],
+                                          gap=config['refit_boundaries']['gap'],
+                                          max_time=config['refit_boundaries']['max_time'])
+
+            # replace lines with refitted axis-aligned boxes
+            region['lines'] = list(cells_to_polygons(new_boxes))
+
     if args.debug:
-        img = cv2.imread(image_path)
+        #img = cv2.imread(image_path)
 
         debug_img = draw_debug_overlay(img, ordered_lines)
 
@@ -977,7 +1052,8 @@ def main():
             'rb'
         ) as f:
             pretty_output_dict = pickle.load(f)
-            # pretty_output_dict = {k: pretty_output_dict[k] for k in list(pretty_output_dict.keys())[:256]}
+            # limit
+            pretty_output_dict = {k: pretty_output_dict[k] for k in list(pretty_output_dict.keys())[:25]}
 
     else:
         pretty_output_dict = align_only(args)

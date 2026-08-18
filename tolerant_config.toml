@@ -38,5 +38,16 @@ confidence = 0.999
 enabled = true
 regularization_parameter = 0.025  # regularizes, MUST BE > 0.0 to handle duplicate landmarks, can be e.g. 0.05
 
+[refit_boundaries]
+peak = 2
+max_expand = 50
+max_push = 25
+min_size = 15
+gap = 0
+w_dev = 0.25
+w_dev_grow = 0.125
+max_time = 600
+workers = 8
+
 [debug]
 enabled = false

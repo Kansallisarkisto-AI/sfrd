@@ -55,7 +55,7 @@ cells_on_shorter_side = 4  # regularizes
 # minimum number of pages with a transform to root for track to be considered valid
 min_support = 3
 # downscaled page size used for alignment, in pixels
-max_alignment_dim = 800  
+max_alignment_dim = 800
 
 [transform_propagation]
 # hop penalty when determining shortest paths
@@ -69,6 +69,17 @@ min_scale = 0.8
 max_scale = 1.2
 # maximum rotation (in degrees)
 max_rotation_deg = 15
+
+[refit_boundaries]
+peak = 2
+max_expand = 50
+max_push = 50
+min_size = 15
+gap = 0
+w_dev = 0.5
+w_dev_grow = 0.25
+max_time = 600
+workers = 8
 
 [debug]
 enabled = false

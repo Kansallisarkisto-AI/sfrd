@@ -19,7 +19,8 @@ dependencies = [
   "psutil>=7.2.2",
   "xlsxwriter>=3.2.9",
   "simpleitk>=2.5.5",
-  "torch-tps"
+  "torch-tps",
+  "ortools"
 ]
 requires-python = ">=3.11"
 authors = [

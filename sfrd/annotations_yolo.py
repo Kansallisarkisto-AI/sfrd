@@ -91,7 +91,7 @@ def load_yolo_obb_labels(label_path, img_w, img_h):
     return [
         (sorted(class_ids), poly)
         for class_ids, poly in objects_by_poly.values()
-    ]
+    ]  # return with sorted class ids (correct order is determined by numerical order from Label Studio)
 
 
 def to_ascii(text):
