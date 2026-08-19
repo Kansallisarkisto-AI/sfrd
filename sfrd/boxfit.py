@@ -258,6 +258,8 @@ def solve(cells, cost, cost_downscale=1, solve_downscale=1, max_expand=25, max_p
     lookup_stats = {'positions': 0, 'segments': 0, 'constant': 0, 'total': 0}
     bound = max_expand_s + max_push_s
 
+    ix, iy = [], []
+
     # Add model variables and size constraints for each cell (rectangle)
     for x0, y0, x1, y1 in cells:
         x0s, y0s, x1s, y1s = downscaled_solver_coordinate(x0), \
@@ -357,17 +359,9 @@ def solve(cells, cost, cost_downscale=1, solve_downscale=1, max_expand=25, max_p
     # We prune away any constraints that would be satisfied by the
     # cell starting position + maximum expansion constraint anyway.
     #
-    # This should result in around O(n * neighbors-per-cell) constraints
-    #
-    # Benefits: 
-    # * pairwise constraints on the same number line are transitive
-    # * much cheaper than a NoOverlap2D constraint
-    # * solution will not switch around the cell order, rather
-    #   just fine-tune the boundaries
-    # Issues:
-    # * solution will not allow overlapping cells 
-    #   (good for tables, might be problematic for forms,
-    #   where the overlaps are empty space that is covered "just in case")
+    # Unlike a fixed-order approach, this lets the solver pick which axis
+    # and direction separates each touching pair, at the cost of 4 bool
+    # vars + 1 bool-or per pair instead of a single inequality.
     n_pairs = n_constrained = 0
     for i in range(n):
         for j in range(i + 1, n):
@@ -375,17 +369,18 @@ def solve(cells, cost, cost_downscale=1, solve_downscale=1, max_expand=25, max_p
             if not _can_touch(cells[i], cells[j], max_expand):
                 continue
             n_constrained += 1
-            axis, i_first = _pair_order(cells[i], cells[j])
-            if axis == 'x':
-                if i_first:
-                    mdl.add(X1[i] + gap_s <= X0[j])
-                else:
-                    mdl.add(X1[j] + gap_s <= X0[i])
-            else:
-                if i_first:
-                    mdl.add(Y1[i] + gap_s <= Y0[j])
-                else:
-                    mdl.add(Y1[j] + gap_s <= Y0[i])
+
+            i_left = mdl.new_bool_var("")   # i entirely left of j
+            j_left = mdl.new_bool_var("")   # j entirely left of i
+            i_above = mdl.new_bool_var("")  # i entirely above j
+            j_above = mdl.new_bool_var("")  # j entirely above i
+
+            mdl.add(X1[i] + gap_s <= X0[j]).only_enforce_if(i_left)
+            mdl.add(X1[j] + gap_s <= X0[i]).only_enforce_if(j_left)
+            mdl.add(Y1[i] + gap_s <= Y0[j]).only_enforce_if(i_above)
+            mdl.add(Y1[j] + gap_s <= Y0[i]).only_enforce_if(j_above)
+
+            mdl.add_bool_or([i_left, j_left, i_above, j_above])
 
     # minimize the sum of edge costs and shrink/grow penalties
     mdl.minimize(w_edge * sum(edge_costs)
@@ -396,7 +391,7 @@ def solve(cells, cost, cost_downscale=1, solve_downscale=1, max_expand=25, max_p
     solver.parameters.max_time_in_seconds = max_time
     solver.parameters.num_search_workers = workers
     solver.parameters.relative_gap_limit = 0.05  # allow 5% gap from optimal
-    solver.parameters.log_search_progress = False
+    solver.parameters.log_search_progress = True
     st = solver.solve(mdl)
     if st not in (cp_model.OPTIMAL, cp_model.FEASIBLE):
         raise RuntimeError(solver.status_name(st))

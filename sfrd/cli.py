@@ -352,11 +352,14 @@ def gpu_worker_loop(args, rank, gpu_task_queue, gpu_results):
     torch.cuda.set_device(rank)
     device_string = f"cuda:{rank}"
 
-    detection_model = load_rfdetr_model(
-        args.detection_model_path,
-        batch_size=1,
-        device=torch.device(device_string),
-    )
+    if args.disregard_regions and args.disregard_lines:
+        detection_model = None
+    else:
+        detection_model = load_rfdetr_model(
+            args.detection_model_path,
+            batch_size=1,
+            device=torch.device(device_string),
+        )
 
     recognition_model, processor = load_trocr_model(
         args.recognition_model_path,
@@ -1053,7 +1056,13 @@ def main():
         ) as f:
             pretty_output_dict = pickle.load(f)
             # limit
-            pretty_output_dict = {k: pretty_output_dict[k] for k in list(pretty_output_dict.keys())[:25]}
+            #pretty_output_dict = {k: pretty_output_dict[k] for k in list(pretty_output_dict.keys())[:25]}
+            filtering = ["4292860141", "4292893670", "4292296198"]
+            pretty_output_dict = {
+                k: v
+                for k, v in pretty_output_dict.items()
+                if any(x in k for x in filtering)
+            }
 
     else:
         pretty_output_dict = align_only(args)
