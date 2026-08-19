@@ -1057,12 +1057,12 @@ def main():
             pretty_output_dict = pickle.load(f)
             # limit
             #pretty_output_dict = {k: pretty_output_dict[k] for k in list(pretty_output_dict.keys())[:25]}
-            filtering = ["4292860141", "4292893670", "4292296198"]
+            '''filtering = ["4292860141", "4292893670", "4292296198"]
             pretty_output_dict = {
                 k: v
                 for k, v in pretty_output_dict.items()
                 if any(x in k for x in filtering)
-            }
+            }'''
 
     else:
         pretty_output_dict = align_only(args)
