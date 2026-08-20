@@ -173,7 +173,7 @@ def parse_args():
     parser.add_argument(
         "--template_suggestion_minimum",
         type=int,
-        default=1,
+        default=15,
         help="Minimum number of images required in a connected component of the alignment graph for the method to suggest a template."
     )
 
