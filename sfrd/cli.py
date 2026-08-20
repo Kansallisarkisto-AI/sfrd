@@ -28,8 +28,8 @@ import traceback
 import psutil
 
 from .cli_helpers import *
-from .boxfit import fit_middle_axis_aligned_box, build_cost_image, \
-                    solve, cells_to_polygons
+from .boxfit import fit_middle_axis_aligned_box, cells_to_polygons, build_cost_image #, solve_boxfit
+from .boxfit_heuristic import solve_boxfit
 from skimage.filters import threshold_otsu
 
 # disable opencv threading because we are using multiprocessing
@@ -764,7 +764,7 @@ def process_single_image(worker_args):
         tps = alignment_result["post_transformation"]
         # TRANSFORM ANNOTATION POLYGONS
         # first apply affine transformation from root to page,
-        # then apply B-Spline transformation (in page coordinates, nothing happens if it is None)
+        # then apply Thin Plate Spline transformation (in page coordinates, nothing happens if it is None)
         annotations = [
             (
                 class_ids,
@@ -797,11 +797,12 @@ def process_single_image(worker_args):
         debug_dir = Path(args.output_directory) / "debug"
         debug_dir.mkdir(parents=True, exist_ok=True)
 
-        out_path = debug_dir / (
+        # save original detections
+        '''out_path = debug_dir / (
             Path(image_path).stem + "_debug_pre.jpg"
         )
 
-        cv2.imwrite(str(out_path), debug_img)
+        cv2.imwrite(str(out_path), debug_img)'''
 
     for region in ordered_lines:
         new_lines = []
@@ -847,9 +848,10 @@ def process_single_image(worker_args):
             # create integer-coordinate representative middle-of-side boxes
             boxes = [round_polygon(fit_middle_axis_aligned_box(x)) for x in region['lines']]
             #print(boxes)
-            new_boxes, refit_info = solve(boxes, cost_image, cost_downscale=args.refit_scale,
+            new_boxes, refit_info = solve_boxfit(boxes, cost_image, cost_downscale=args.refit_scale,
                                           solve_downscale=args.refit_scale,
                                           workers=config['refit_boundaries']['workers'], 
+                                          w_edge=config['refit_boundaries']['w_edge'],
                                           w_dev=config['refit_boundaries']['w_dev'],
                                           w_dev_grow=config['refit_boundaries']['w_dev_grow'],
                                           max_expand=config['refit_boundaries']['max_expand'],

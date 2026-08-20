@@ -20,7 +20,8 @@ dependencies = [
   "xlsxwriter>=3.2.9",
   "simpleitk>=2.5.5",
   "torch-tps",
-  "ortools"
+  "ortools",
+  "scipy"
 ]
 requires-python = ">=3.11"
 authors = [

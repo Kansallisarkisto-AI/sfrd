@@ -1,7 +1,7 @@
 import numpy as np
 from ortools.sat.python import cp_model
 
-def build_cost_image(gray, downscale=1, peak=2, normalization_max_percentile=98):
+def build_cost_image(gray, downscale=1, peak=2, normalization_max_percentile=98, spread=2):
     """Build an edge-cost image using Sobel filters
 
     Args:
@@ -26,6 +26,10 @@ def build_cost_image(gray, downscale=1, peak=2, normalization_max_percentile=98)
     gy = cv2.Sobel(g, cv2.CV_32F, 0, 1, ksize=3)
     grad = cv2.magnitude(gx, gy)
 
+    spread /= downscale
+
+    #grad = cv2.GaussianBlur(grad, (0, 0), sigmaX=max(spread / 2, 0.5))
+
     # normalize against a high percentile rather than the max, so one
     # unusually sharp pixel doesn't wash out the whole scale
     # adjusting this percentile makes sense, used to be 99
@@ -33,7 +37,8 @@ def build_cost_image(gray, downscale=1, peak=2, normalization_max_percentile=98)
     normalized = np.clip(grad / ref, 0, 1)
 
     cost = peak * (normalized)
-    return np.clip(cost, 0, peak).astype(np.int32)
+    #return np.clip(cost, 0, peak).astype(np.int32)
+    return np.round(np.clip(cost, 0, peak)).astype(np.int32)
 
 def _fit_from_four_corners(pts):
     """
@@ -135,6 +140,18 @@ def fit_middle_axis_aligned_box(points, iterations=3):
  
     return left, top, right, bottom
 
+def _can_touch(ci, cj, max_expand):
+    """Check if rectangles ci and cj can possibly overlap,
+    considering a maximum expansion of max_expand on every side.
+    (we can disregard shrinking because it can't create any new overlaps)
+    Use this to prune unnecessary constraints.
+    """
+    xi0, yi0, xi1, yi1 = ci
+    xj0, yj0, xj1, yj1 = cj
+    x_reach = (xi1 + max_expand) > (xj0 - max_expand) and (xj1 + max_expand) > (xi0 - max_expand)
+    y_reach = (yi1 + max_expand) > (yj0 - max_expand) and (yj1 + max_expand) > (yi0 - max_expand)
+    return x_reach and y_reach
+
 def _pair_order(ci, cj):
     """For two rectangles (x0, y0, x1, y1), decide which comes first.
 
@@ -162,18 +179,6 @@ def _pair_order(ci, cj):
 
     return ('x', xf) if gx >= gy else ('y', yf)
 
-def _can_touch(ci, cj, max_expand):
-    """Check if rectangles ci and cj can possibly overlap,
-    considering a maximum expansion of max_expand on every side.
-    (we can disregard shrinking because it can't create any new overlaps)
-    Use this to prune unnecessary constraints.
-    """
-    xi0, yi0, xi1, yi1 = ci
-    xj0, yj0, xj1, yj1 = cj
-    x_reach = (xi1 + max_expand) > (xj0 - max_expand) and (xj1 + max_expand) > (xi0 - max_expand)
-    y_reach = (yi1 + max_expand) > (yj0 - max_expand) and (yj1 + max_expand) > (yi0 - max_expand)
-    return x_reach and y_reach
-
 def _rle(vals):
     """Run-length encode a list of ints into (start_offset, end_offset,
     value) triples."""
@@ -188,7 +193,7 @@ def _rle(vals):
 
     return segs
 
-def solve(cells, cost, cost_downscale=1, solve_downscale=1, max_expand=25, max_push=15,
+def solve_boxfit(cells, cost, cost_downscale=1, solve_downscale=1, max_expand=25, max_push=15,
           min_size=15, gap=1, w_edge=1, w_dev=1, w_dev_grow=None,
           max_time=60.0, workers=8):
     """
@@ -273,6 +278,11 @@ def solve(cells, cost, cost_downscale=1, solve_downscale=1, max_expand=25, max_p
         c = mdl.new_int_var(y0s - max_expand_s, y0s + max_push_s, "")
         d = mdl.new_int_var(y1s - max_push_s, y1s + max_expand_s, "")
 
+        '''mdl.add_hint(a, x0s)
+        mdl.add_hint(b, x1s)
+        mdl.add_hint(c, y0s)
+        mdl.add_hint(d, y1s)'''
+
         # minimum size constraint
         mdl.add(b - a >= min_size_s)
         mdl.add(d - c >= min_size_s)
@@ -283,6 +293,7 @@ def solve(cells, cost, cost_downscale=1, solve_downscale=1, max_expand=25, max_p
         # 'a' and 'c' are the "lo" edges (x0, y0): moving them to a larger value
         # means the edge moved inward (shrinking).
         # A smaller value means it moved outward (growing). 
+        #
         # 'b' and 'd' are the "hi" edges (x1, y1): the sign is 
         # flipped so larger means outward (growing).
         for var, orig_s, is_lo in ((a, x0s, True), (b, x1s, False),
@@ -301,8 +312,10 @@ def solve(cells, cost, cost_downscale=1, solve_downscale=1, max_expand=25, max_p
 
         # Precalculate *ceteris paribus* edge costs, i.e. the
         # accumulated cost values along the edge line boundary for each possible edge position.
+        #
         # This means we assume that when side edges are moved,
         # the top and bottom edges would stay unmoved and vice versa.
+        #
         # The assumption is not strictly true but it speeds up solving
         # significantly and is valid enough when the range of movement is small.
         ny0, ny1 = np.clip([round(y0 / cost_downscale), round(y1 / cost_downscale)], 0, Hn)
@@ -359,9 +372,17 @@ def solve(cells, cost, cost_downscale=1, solve_downscale=1, max_expand=25, max_p
     # We prune away any constraints that would be satisfied by the
     # cell starting position + maximum expansion constraint anyway.
     #
-    # Unlike a fixed-order approach, this lets the solver pick which axis
-    # and direction separates each touching pair, at the cost of 4 bool
-    # vars + 1 bool-or per pair instead of a single inequality.
+    # This should result in around O(n * neighbors-per-cell) constraints
+    #
+    # Benefits: 
+    # * pairwise constraints on the same number line are transitive
+    # * much cheaper than a NoOverlap2D constraint
+    # * solution will not switch around the cell order, rather
+    #   just fine-tune the boundaries
+    # Issues:
+    # * solution will not allow overlapping cells 
+    #   (good for tables, might be problematic for forms,
+    #   where the overlaps are empty space that is covered "just in case")
     n_pairs = n_constrained = 0
     for i in range(n):
         for j in range(i + 1, n):
@@ -369,18 +390,17 @@ def solve(cells, cost, cost_downscale=1, solve_downscale=1, max_expand=25, max_p
             if not _can_touch(cells[i], cells[j], max_expand):
                 continue
             n_constrained += 1
-
-            i_left = mdl.new_bool_var("")   # i entirely left of j
-            j_left = mdl.new_bool_var("")   # j entirely left of i
-            i_above = mdl.new_bool_var("")  # i entirely above j
-            j_above = mdl.new_bool_var("")  # j entirely above i
-
-            mdl.add(X1[i] + gap_s <= X0[j]).only_enforce_if(i_left)
-            mdl.add(X1[j] + gap_s <= X0[i]).only_enforce_if(j_left)
-            mdl.add(Y1[i] + gap_s <= Y0[j]).only_enforce_if(i_above)
-            mdl.add(Y1[j] + gap_s <= Y0[i]).only_enforce_if(j_above)
-
-            mdl.add_bool_or([i_left, j_left, i_above, j_above])
+            axis, i_first = _pair_order(cells[i], cells[j])
+            if axis == 'x':
+                if i_first:
+                    mdl.add(X1[i] + gap_s <= X0[j])
+                else:
+                    mdl.add(X1[j] + gap_s <= X0[i])
+            else:
+                if i_first:
+                    mdl.add(Y1[i] + gap_s <= Y0[j])
+                else:
+                    mdl.add(Y1[j] + gap_s <= Y0[i])
 
     # minimize the sum of edge costs and shrink/grow penalties
     mdl.minimize(w_edge * sum(edge_costs)
@@ -466,7 +486,7 @@ if __name__ == '__main__':
     gray, cells, cost = make_test_data(cost_scale=COST_SCALE, peak=2)  # adjusting peak will speed up optimization
     print(f'{len(cells)} cells, cost image {cost.shape} at cost_scale={COST_SCALE}, '
           f'solving at solve_scale={SOLVE_SCALE}')
-    new_cells, info = solve(cells, cost, cost_downscale=COST_SCALE, solve_downscale=SOLVE_SCALE,
+    new_cells, info = solve_boxfit(cells, cost, cost_downscale=COST_SCALE, solve_downscale=SOLVE_SCALE,
                             max_expand=25, max_push=25, w_dev=W_DEV, w_dev_grow=W_DEV_GROW)
     print(info['status'], 'objective', info['objective'],
           '| edge_cost', info['edge_cost'],
