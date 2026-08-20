@@ -1,7 +1,8 @@
 import json
 from pathlib import Path
 import shutil
-from typing import List
+import typing
+#from typing import List
 from concurrent.futures import ThreadPoolExecutor, ProcessPoolExecutor
 from tqdm.auto import tqdm
 from collections import defaultdict
@@ -247,7 +248,7 @@ def make_gray_thumbnail(path, size):
 
 def build_edges_and_features_parallel(
     matcher_params: SIFTMatcher,
-    images: list[Path],
+    images: typing.List[Path],
     max_dim: int | None,
     ransac_thresh: float,
     neighbor_pairs: NeighborPairs,
@@ -656,8 +657,8 @@ def final_alignment_parallel(
 
 # ENTRY POINT
 def align_pages(
-    images_to_align: List[Path],
-    roots: List[Path],
+    images_to_align: typing.List[Path],
+    roots: typing.List[Path],
     yolo_obb_dir
 ):
     """

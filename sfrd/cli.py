@@ -1,6 +1,6 @@
 from sfrd import align_pages, load_yolo_obb_labels, load_classes, \
                  invert_affine_numba, apply_affine_numba, apply_sitk_transform_to_points, \
-                 config, apply_tps
+                 config, apply_tps, suggest_templates
 
 from nafhtr import *
 import argparse
@@ -31,6 +31,10 @@ from .cli_helpers import *
 from .boxfit import fit_middle_axis_aligned_box, cells_to_polygons, build_cost_image #, solve_boxfit
 from .boxfit_heuristic import solve_boxfit
 from skimage.filters import threshold_otsu
+
+import random
+
+import shutil
 
 # disable opencv threading because we are using multiprocessing
 cv2.setNumThreads(1)
@@ -161,6 +165,26 @@ def parse_args():
     )
 
     parser.add_argument(
+        "--suggest_templates",
+        action="store_true",
+        help="Suggest templates only, store in output directory."
+    )
+
+    parser.add_argument(
+        "--template_suggestion_minimum",
+        type=int,
+        default=3,
+        help="Minimum number of images required in a connected component of the alignment graph for the method to suggest a template."
+    )
+
+    parser.add_argument(
+        "--template_suggestion_samplesize",
+        type=int,
+        default=2500,
+        help="Maximum sample size for template suggestion (without replacement)."
+    )
+
+    parser.add_argument(
         "--align_only",
         action="store_true",
         help="Align only, store in output directory."
@@ -256,6 +280,34 @@ def parse_args():
 
     return parser.parse_args()
 
+def find_and_copy_templates(args):
+    """
+    Finds suggested templates from input directory and writes them to "<outdir>/suggested_templates"
+
+    Args:
+        args (argparse.Namespace): Parsed CLI arguments containing
+            input/output paths and alignment settings.
+    """
+
+    random.seed(42)
+    all_images = load_image_paths(args.input_directory)
+
+    if args.template_suggestion_samplesize < len(all_images):
+        all_images = random.sample(all_images, k=args.template_suggestion_samplesize)
+
+    print(f"Starting template suggestion for {len(all_images)} images.")
+    templates = suggest_templates(all_images, image_count_threshold = args.template_suggestion_minimum)
+
+    suggestion_dir = Path(args.output_directory) / "suggested_templates"
+    suggestion_dir.mkdir(parents=True, exist_ok=True)
+
+    if templates is None:
+        print("Didn't find any templates")
+    else:
+        print(f"Found {len(templates)} templates, copying to {str(suggestion_dir)}")
+
+    for template in templates:
+        shutil.copy(template, suggestion_dir)
 
 def align_only(args):
     """
@@ -1023,6 +1075,7 @@ def main():
     Run the full structuralization pipeline.
 
     The pipeline supports:
+    - Template suggestion only
     - Alignment-only execution
     - Processing-only execution
     - Both alignment and processing consecutively
@@ -1043,7 +1096,11 @@ def main():
     output_dir_path = Path(args.output_directory)
     output_dir_path.mkdir(parents=True, exist_ok=True)
 
-    if args.align_only:
+    if args.suggest_templates:
+        find_and_copy_templates(args)
+        return
+
+    elif args.align_only:
         align_only(args)
         return
 
