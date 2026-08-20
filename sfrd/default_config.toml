@@ -74,10 +74,11 @@ max_rotation_deg = 15
 peak = 2
 max_expand = 50
 max_push = 50
-min_size = 15
+min_size = 10
 gap = 0
-w_dev = 0.5
-w_dev_grow = 0.25
+w_edge = 1
+w_dev = 2.0  # used to be 2.0
+w_dev_grow = 0.15
 max_time = 600
 workers = 8
 
