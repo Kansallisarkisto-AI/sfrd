@@ -6,6 +6,8 @@ Structure from Repeating Documents (SfRD) discovers and/or exploits structure in
 ## Usage
 Install this package and the nafhtr library from [this branch](https://github.com/Kansallisarkisto-AI/rfdetr_trocr_pipeline/tree/make-library), then run the ```structuralizer``` command for help. User documentation will be added as the project matures.
 
+If you don't know what the templates are in your collection, consider trying the ```--suggest_templates``` feature.
+
 ## Motivation
 Traditional image registration methods can be used to align digitized forms and index cards onto a single annotated template. However, image registration sometimes fails when the features are not sufficiently invariant to changing imaging conditions or there are too many nuisance features relative to template features, such as written content, degradations or minor template revisions in the documents. Additionally, traditional descriptor-based feature matching often cannot reliably output paired keypoints for fitting more complex transformations or deformations than a homography/perspective transformation and requires robust estimation methods such as RANSAC and small degrees of freedom when the feature matching is unreliable. In archives, utilizing the full series of repeating documents enables us to reliably separate stable template features from the per-page variable content. 
 

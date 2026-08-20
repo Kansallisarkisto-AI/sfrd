@@ -8,6 +8,7 @@ The project currently uses date-based versioning. Version numbers may be introdu
 
 ### Added
 - Added heuristic and exact solvers for refining bounding boxes
+- Added template suggestion feature, which finds the most central nodes in the connected components of the alignment graph.
 
 ### Changed
 - N/A
