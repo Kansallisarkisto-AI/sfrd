@@ -36,7 +36,7 @@ def find_connected_components(edges):
 def suggest_templates(all_images: typing.List[Path], image_count_threshold=2, samples_per_component=1):
     """Selects representative template images from clustered image groups.
     
-    Builds the collection alignment graph. identifies connected components, 
+    Builds the collection alignment graph, identifies connected components, 
     and returns well-spread samples from each sufficiently large component 
     using a farthest-point heuristic.
     
