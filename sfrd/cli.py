@@ -171,7 +171,7 @@ def parse_args():
     )
 
     parser.add_argument(
-        "--template_suggestion_minimum",
+        "--template_suggestion_threshold",
         type=int,
         default=15,
         help="Minimum number of images required in a connected component of the alignment graph for the method to suggest a template."
@@ -182,6 +182,13 @@ def parse_args():
         type=int,
         default=2500,
         help="Maximum sample size for template suggestion (without replacement)."
+    )
+
+    parser.add_argument(
+        "--template_suggestions_per_component",
+        type=int,
+        default=1,
+        help="Number of samples inside each component."
     )
 
     parser.add_argument(
@@ -295,19 +302,30 @@ def find_and_copy_templates(args):
     if args.template_suggestion_samplesize < len(all_images):
         all_images = random.sample(all_images, k=args.template_suggestion_samplesize)
 
-    print(f"Starting template suggestion for {len(all_images)} images.")
-    templates = suggest_templates(all_images, image_count_threshold = args.template_suggestion_minimum)
+    print(f"Starting template suggestion for {len(all_images)} images with {args.template_suggestions_per_component} suggestions per connected component.")
+    templates = suggest_templates(all_images, image_count_threshold=args.template_suggestion_threshold, 
+                                  samples_per_component=args.template_suggestions_per_component)
 
     suggestion_dir = Path(args.output_directory) / "suggested_templates"
     suggestion_dir.mkdir(parents=True, exist_ok=True)
 
     if templates is None:
         print("Didn't find any templates")
+        return
     else:
         print(f"Found {len(templates)} templates, copying to {str(suggestion_dir)}")
 
-    for template in templates:
-        shutil.copy(template, suggestion_dir)
+    i = 0
+    for component in templates:
+        priority = 0
+        for template in component:
+            template_path = Path(template)
+            out_path = suggestion_dir / Path(f"component{i}")
+            out_path.mkdir(parents=True, exist_ok=True)
+            shutil.copy(template_path, out_path / Path(f"p{priority}_" + template_path.name))
+            priority += 1
+
+        i += 1
 
 def align_only(args):
     """

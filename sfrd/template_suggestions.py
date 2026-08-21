@@ -11,6 +11,14 @@ from .unionfind import UnionFind
 from .graph import propagate_transforms_multi_source_dijkstra_numba
 
 def find_connected_components(edges):
+    """Groups nodes into connected components using union-find.
+    
+    Args:
+        edges: List of tuples (a, b, ...) representing connected node pairs.
+    
+    Returns:
+        List of lists, where each inner list contains node IDs in a component.
+    """
     uf = UnionFind()
 
     # Union all nodes connected by an edge
@@ -25,11 +33,27 @@ def find_connected_components(edges):
 
     return list(components.values())
 
-def suggest_templates(all_images: typing.List[Path], image_count_threshold=2):
+def suggest_templates(all_images: typing.List[Path], image_count_threshold=2, samples_per_component=1):
+    """Selects representative template images from clustered image groups.
+    
+    Builds the collection alignment graph. identifies connected components, 
+    and returns well-spread samples from each sufficiently large component 
+    using a farthest-point heuristic.
+    
+    Args:
+        all_images: List of image file paths.
+        image_count_threshold: Minimum images required in a component to suggest templates.
+        samples_per_component: Number of representative samples to select per component.
+    
+    Returns:
+        List of lists of Path objects, where each inner list contains template
+        samples from one component, or None if no templates were found.
+    """
     n = len(all_images)
 
     neighbor_pairs = NeighborPairs(n, 0)
 
+    # build features
     feats, edges = build_edges_and_features_parallel(
         {"nfeatures": config["sift"]["nfeatures"], 
          "min_matches": config["ransac_graph"]["min_matches"],
@@ -56,15 +80,16 @@ def suggest_templates(all_images: typing.List[Path], image_count_threshold=2):
         if len(component) >= image_count_threshold:
             best_distance = math.inf
             best_node = None
+            best_dist_arr = None
 
             for node in component:
                 root_indices_numba = List([node])  # numba typed list
 
                 # try using node as root
-                T_all, owner, dist = propagate_transforms_multi_source_dijkstra_numba(
+                _, _, dist = propagate_transforms_multi_source_dijkstra_numba(
                     len(feats),
-                    root_indices_numba,  # _numba
-                    edges_numba,  # _numba
+                    root_indices_numba,
+                    edges_numba,
                     hop_penalty=config["transform_propagation"]["hop_penalty"],
                     prob_floor=1e-6,
                 )
@@ -79,8 +104,39 @@ def suggest_templates(all_images: typing.List[Path], image_count_threshold=2):
                 if average_dist < best_distance:
                     best_node = node
                     best_distance = average_dist
+                    best_dist_arr = dist  # keep distance array
 
             if best_node is not None:
-                best_central_nodes.append(best_node)
+                # Heuristic farthest-point (k-center) sampling within this component,
+                # starting from the most central node
+                samples = [best_node]
+                min_dist = best_dist_arr
 
-    return [all_images[i] for i in best_central_nodes]
+                for _ in range(samples_per_component - 1):
+                    candidates = [m for m in component if m not in samples]
+                    if not candidates:
+                        break
+
+                    # find next node that is farthest away from last sample
+                    # (min_dist from last sample is set above and after every dijkstra call)
+                    next_node = max(
+                        candidates,
+                        key=lambda m: min_dist[m] if not math.isinf(min_dist[m]) else -1
+                    )
+                    samples.append(next_node)
+
+                    # only recompute if there's another iteration left
+                    if len(samples) < samples_per_component:
+                        root_indices_numba = List(samples)
+                        _, _, min_dist = propagate_transforms_multi_source_dijkstra_numba(
+                            len(feats),
+                            root_indices_numba,
+                            edges_numba,
+                            hop_penalty=config["transform_propagation"]["hop_penalty"],
+                            prob_floor=1e-6,
+                        )
+
+                # append a new component as a list of samples that are well spread out
+                best_central_nodes.append(samples)
+
+    return [[all_images[i] for i in x] for x in best_central_nodes]
