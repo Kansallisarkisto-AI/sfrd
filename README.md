@@ -4,7 +4,20 @@ Structure from Repeating Documents (SfRD) discovers and/or exploits structure in
 [![ArchXAI project logo](https://centralbaltic.eu/wp-content/uploads/2025/07/ArchXAI_RGB_JPG-335x170.jpg)](https://centralbaltic.eu/project/archxai/)
 
 ## Usage
-Install this package and the nafhtr library from [this branch](https://github.com/Kansallisarkisto-AI/rfdetr_trocr_pipeline/tree/make-library), then run the ```structuralizer``` command for help. User documentation will be added as the project matures.
+Install this package and the [nafrec](https://github.com/Kansallisarkisto-AI/nafrec) library (e.g. `pip install nafrec[gpu]` or `nafrec[cpu]`), then run the ```structuralizer``` command for help. User documentation will be added as the project matures.
+
+Text line detection and recognition is done by nafrec. Any command line option that `structuralizer` does not recognize is passed on to nafrec, so for example
+
+```bash
+structuralizer --input_directory ... --output_directory ... --annotation_directory ... \
+    --detection_model_path det.pth \
+    --recognition_model_path trocr --processor_path trocr \
+    --cyrillic_recognition_model_path cyr --cyrillic_processor_path cyr \
+    --script_classification_model_path script.pt \
+    --device cuda --gpu_ids 0 1 --tile_size 768
+```
+
+uses a script classifier to send each line to the latin or the cyrillic recognition model. The cyrillic model is optional: with only one recognition model configured, all lines go to it. See `nafrec --help` for all options. The `--disregard_regions`/`--disregard_lines` options of SfRD itself are unchanged, and with both of them no detection model is needed. `--cpu_processes` sets the number of SfRD CPU workers; nafrec starts and manages the model (GPU) workers.
 
 If you don't know what the templates are in your collection, consider trying the ```--suggest_templates``` feature. The default (or a similarly strict) config is recommended for template finding.
 

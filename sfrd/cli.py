@@ -2,10 +2,12 @@ from sfrd import align_pages, load_yolo_obb_labels, load_classes, \
                  invert_affine_numba, apply_affine_numba, apply_sitk_transform_to_points, \
                  config, apply_tps, suggest_templates
 
-from nafhtr import *
+from nafrec import NAFRec, get_default_region, get_line_regions, order_regions_lines
+from nafrec.main import parse_args as parse_nafrec_args, make_args as make_nafrec_args, validate_args as validate_nafrec_args
 import argparse
-import torch
+import contextlib
 import glob
+import io
 import os
 from pathlib import Path
 import cv2
@@ -21,11 +23,6 @@ import pickle
 from multiprocessing import get_context
 from tqdm import tqdm
 import json
-
-import itertools
-import time
-import traceback
-import psutil
 
 from .cli_helpers import *
 from .boxfit import fit_middle_axis_aligned_box, cells_to_polygons, build_cost_image #, solve_boxfit
@@ -46,7 +43,18 @@ def parse_args():
     Returns:
         argparse.Namespace: Parsed command-line arguments.
     """
-    parser = argparse.ArgumentParser(description="Run structuralization")
+    parser = argparse.ArgumentParser(
+        description="Run structuralization",
+        epilog=(
+            "Options not listed here are passed on to nafrec, which does the text line detection "
+            "and recognition: e.g. --detection_model_path, --recognition_model_path, --processor_path, "
+            "optionally --cyrillic_recognition_model_path, --cyrillic_processor_path and "
+            "--script_classification_model_path, plus --device, --gpu_ids, --tile_size, "
+            "--confidence_threshold, --trocr_batch_size. Run `nafrec --help` for the full list."
+        ),
+        # an abbreviation must not silently swallow an option meant for nafrec
+        allow_abbrev=False,
+    )
 
     parser.add_argument(
         "--config",
@@ -55,24 +63,6 @@ def parse_args():
         help="Path to config file"
     )
 
-    parser.add_argument(
-        "--detection_model_path",
-        type=str,
-        default='/path/to/rfdetr/model.pth',
-        help="Path to the detection model file"
-    )
-    parser.add_argument(
-        "--recognition_model_path",
-        type=str,
-        default='/path/to/trocr/model/folder/',
-        help="Path to the recognition model folder"
-    )
-    parser.add_argument(
-        "--recognition_model_revision",
-        type=str,
-        default='main',
-        help="Recognition model revision"
-    )
     parser.add_argument(
         "--input_directory",
         type=str,
@@ -96,48 +86,6 @@ def parse_args():
 
     # Thresholds
     parser.add_argument(
-        "--confidence_threshold",
-        type=float,
-        default=0.15,
-        help="Detection confidence threshold"
-    )
-    parser.add_argument(
-        "--line_percentage_threshold",
-        type=float,
-        default=7e-05,
-        help="Threshold value for filtering out small line polygons"
-    )
-    parser.add_argument(
-        "--region_percentage_threshold",
-        type=float,
-        default=7e-05,
-        help="Threshold value for filtering out small region polygons"
-    )
-    parser.add_argument(
-        "--line_iou",
-        type=float,
-        default=0.3,
-        help="Threshold value for merging overlapping lines"
-    )
-    parser.add_argument(
-        "--region_iou",
-        type=float,
-        default=0.3,
-        help="Threshold value for merging overlapping regions"
-    )
-    parser.add_argument(
-        "--line_overlap_threshold",
-        type=float,
-        default=0.5,
-        help="Threshold value for merging overlapping lines"
-    )
-    parser.add_argument(
-        "--region_overlap_threshold",
-        type=float,
-        default=0.5,
-        help="Threshold value for merging overlapping regions"
-    )
-    parser.add_argument(
         "--association_overlap_threshold",
         type=float,
         default=0.03,
@@ -147,12 +95,6 @@ def parse_args():
             "required for associating text lines with labels "
             "in the annotation"
         ),
-    )
-    parser.add_argument(
-        "--text_batch_size",
-        type=int,
-        default=8,
-        help="Batch size for text recognition"
     )
     parser.add_argument("--disregard_regions", action="store_true",
                         help="Do not use segmentation model for text regions")
@@ -247,45 +189,25 @@ def parse_args():
         "--cpu_processes",
         type=int,
         default=0,
-        help="Number of CPU preprocessing/postprocessing workers. Default: min(os.cpu_count(), 6 * number of GPUs)."
+        help="Number of SfRD CPU workers (these also do the CPU side of detection and recognition; nafrec manages the model workers). Default: the number nafrec would use for its own CPU workers."
     )
 
-    parser.add_argument(
-        "--gpu_in_flight_limit",
-        type=int,
-        default=32,
-        help="Maximum number of GPU requests queued/in flight at once."
-    )
+    args, nafrec_argv = parser.parse_known_args()
 
-    parser.add_argument(
-        "--workers_per_gpu",
-        type=int,
-        default=1,
-        help="Number of GPU workers per GPU"
-    )
+    # Everything SfRD doesn't recognize goes to nafrec. Parse (and, when the models will be
+    # needed, validate) it now so that mistakes surface before the long alignment step.
+    nafrec_options = vars(parse_nafrec_args(nafrec_argv, library=True))
+    if args.disregard_regions and args.disregard_lines:
+        nafrec_options["detector"] = "none"  # no segmentation model needed
+    if not (args.suggest_templates or args.align_only):
+        try:
+            with contextlib.redirect_stdout(io.StringIO()):  # NAFRec prints its info messages again
+                validate_nafrec_args(make_nafrec_args(**nafrec_options))
+        except ValueError as e:
+            parser.error(str(e))
+    args.nafrec_options = nafrec_options
 
-    parser.add_argument(
-        "--segmentation_tilesize",
-        type=int,
-        default=0,
-        help="Tile size for segmentation (e.g. 768px), 0 to disable"
-    )
-
-    parser.add_argument(
-        "--segmentation_tileoverlap",
-        type=int,
-        default=128,
-        help="Tile overlap for segmentation (e.g. 128px), 0 to disable"
-    )
-
-    parser.add_argument(
-        "--segmentation_overallsize",
-        type=int,
-        default=768,
-        help="Overall size of image fed into segmentation (when tiling, _subtract_ segmentation_tileoverlap)"
-    )
-
-    return parser.parse_args()
+    return args
 
 def find_and_copy_templates(args):
     """
@@ -397,147 +319,6 @@ def align_only(args):
 
     return pretty_output_dict
 
-
-_GPU_REQUEST_COUNTER = itertools.count()
-
-
-def gpu_worker_loop(args, rank, gpu_task_queue, gpu_results):
-    """
-    Run a GPU worker process for detection and recognition tasks.
-
-    Each worker initializes OCR and detection models on a dedicated GPU
-    and continuously processes queued inference requests.
-
-    Supported task types:
-    - predict_polygons
-    - get_text_predictions
-
-    Args:
-        args (argparse.Namespace): Parsed runtime arguments.
-        rank (int): CUDA device index assigned to this worker.
-        gpu_task_queue (multiprocessing.Queue): Queue containing GPU tasks.
-        gpu_results (multiprocessing.Manager.dict): Shared dictionary for
-            returning inference results and exceptions.
-    """
-    torch.cuda.set_device(rank)
-    device_string = f"cuda:{rank}"
-
-    if args.disregard_regions and args.disregard_lines:
-        detection_model = None
-    else:
-        detection_model = load_rfdetr_model(
-            args.detection_model_path,
-            batch_size=1,
-            device=torch.device(device_string),
-        )
-
-    recognition_model, processor = load_trocr_model(
-        args.recognition_model_path,
-        args.recognition_model_path,
-        device=device_string,
-        revision=args.recognition_model_revision
-    )
-
-    print(f"Loading {device_string}")
-
-    while True:
-        task = gpu_task_queue.get()
-
-        try:
-            if task is None:
-                return
-
-            kind, request_id, payload = task
-
-            if kind == "predict_polygons":
-                image_path = payload["image_path"]
-
-                result = predict_polygons(
-                    detection_model,
-                    image_path,
-                    max_size=args.segmentation_overallsize,
-                    confidence_threshold=args.confidence_threshold,
-                    line_percentage_threshold=args.line_percentage_threshold,
-                    region_percentage_threshold=args.region_percentage_threshold,
-                    line_iou=args.line_iou,
-                    region_iou=args.region_iou,
-                    line_overlap_threshold=args.line_overlap_threshold,
-                    region_overlap_threshold=args.region_overlap_threshold,
-                    tile_size=args.segmentation_tilesize,
-                    tile_overlap=args.segmentation_tileoverlap
-                )
-
-            elif kind == "get_text_predictions":
-                input_data = TextPredictionInput(
-                    image_path=payload["image_path"],
-                    line_threshold=args.text_batch_size,
-                )
-
-                result = get_text_predictions(
-                    input_data,
-                    payload["ordered_lines"],
-                    recognition_model,
-                    processor,
-                )
-
-            else:
-                raise ValueError(f"Unknown GPU task kind: {kind}")
-
-            gpu_results[request_id] = {
-                "ok": True,
-                "result": result,
-            }
-
-        except Exception:
-            gpu_results[request_id] = {
-                "ok": False,
-                "error": traceback.format_exc(),
-            }
-
-        finally:
-            gpu_task_queue.task_done()
-
-
-def run_gpu_task(gpu_task_queue, gpu_results, gpu_slots, kind, payload):
-    """
-    Submit a task to a GPU worker and wait for completion.
-
-    Handles synchronization and bounded concurrency using semaphores.
-
-    Args:
-        gpu_task_queue (multiprocessing.Queue): Queue for GPU tasks.
-        gpu_results (multiprocessing.Manager.dict): Shared result store.
-        gpu_slots (multiprocessing.BoundedSemaphore): Semaphore limiting
-            concurrent GPU requests.
-        kind (str): Task type identifier.
-        payload (dict): Task-specific input payload.
-
-    Returns:
-        Any: Result returned by the GPU worker.
-
-    Raises:
-        RuntimeError: If the GPU worker reports an exception.
-    """
-    request_id = f"{os.getpid()}-{next(_GPU_REQUEST_COUNTER)}"
-
-    gpu_slots.acquire()
-
-    try:
-        gpu_task_queue.put((kind, request_id, payload))
-
-        while True:
-            result = gpu_results.pop(request_id, None)
-
-            if result is not None:
-                if result["ok"]:
-                    return result["result"]
-
-                raise RuntimeError(result["error"])
-
-            time.sleep(0.05)
-
-    finally:
-        gpu_slots.release()
 
 def round_polygon(poly):
     return [round(x) for x in poly]
@@ -668,9 +449,10 @@ def finalize_blackout_logic_parallel(final_outputs, args):
 
 
 GLOBAL_CLASSES = None
+NAFREC = None
 
 
-def init_worker(annotation_directory, config_file):
+def init_worker(annotation_directory, config_file, nafrec_handle):
     """
     Initialize multiprocessing worker state.
 
@@ -680,8 +462,12 @@ def init_worker(annotation_directory, config_file):
     Args:
         annotation_directory (str | Path): Directory containing
             the classes.txt annotation file.
+        config_file (str): Path to the SfRD config file ('' for default).
+        nafrec_handle (NAFRec): Handle to the nafrec model workers, used for
+            detection and recognition from this process.
     """
-    global GLOBAL_CLASSES
+    global GLOBAL_CLASSES, NAFREC
+    NAFREC = nafrec_handle
 
     GLOBAL_CLASSES = load_classes(
         Path(annotation_directory) / "classes.txt"
@@ -711,9 +497,6 @@ def process_single_image(worker_args):
             - image path
             - alignment metadata
             - runtime arguments
-            - GPU task queue
-            - GPU result dictionary
-            - GPU semaphore
 
     Returns:
         tuple[dict, dict]:
@@ -724,9 +507,6 @@ def process_single_image(worker_args):
         image_path,
         alignment_result,
         args,
-        gpu_task_queue,
-        gpu_results,
-        gpu_slots,
     ) = worker_args
 
     global GLOBAL_CLASSES
@@ -746,12 +526,7 @@ def process_single_image(worker_args):
     else:
         # predict regions and lines normally using segmentation model
         line_polygons, line_confs, line_max_mins, region_polygons, \
-            region_confs, region_max_mins, image_shape = run_gpu_task(
-                gpu_task_queue,
-                gpu_results,
-                gpu_slots,
-                "predict_polygons",
-                {"image_path": image_path})
+            region_confs, region_max_mins, image_shape = NAFREC.detect(image_path)
 
         line_preds = {
             'coords': line_polygons,
@@ -956,16 +731,10 @@ def process_single_image(worker_args):
         output_values["image_identifier"] = image_path.removeprefix(
             args.input_directory).removeprefix("/")
 
-        text_predictions = run_gpu_task(
-            gpu_task_queue,
-            gpu_results,
-            gpu_slots,
-            "get_text_predictions",
-            {
-                "image_path": image_path,
-                "ordered_lines": ordered_lines,
-            },
-        )
+        # classification (if a cyrillic model is configured) + recognition of the associated lines;
+        # None if no lines were left in any region
+        recognized = NAFREC.recognize(image_path, ordered_lines)
+        text_predictions = recognized[0] if recognized else []
 
         for region_predictions, original_region in zip(
             text_predictions,
@@ -1100,8 +869,8 @@ def main():
 
     Main stages include:
     - Alignment
-    - Text line detection with RF-DETR and association with aligned YOLO-OBB annotation
-    - Text recognition
+    - Text line detection (nafrec) and association with aligned YOLO-OBB annotation
+    - Text recognition (nafrec; script classification if a cyrillic model is configured)
     - Crossout (label starting with "||") and underline processing (labels starting with "__")
     - Structured export to compressed NDJSON and XLSX
     """
@@ -1147,52 +916,21 @@ def main():
         os.environ["OPENBLAS_NUM_THREADS"] = "1"
         os.environ["OMP_NUM_THREADS"] = "1"
 
-    n_gpus = torch.cuda.device_count()
+    # nafrec starts and manages the model workers; SfRD only needs its own CPU processes
+    rec = NAFRec(cpu_pool=False, **args.nafrec_options)
 
-    if n_gpus < 1:
-        raise RuntimeError("No CUDA GPUs detected")
+    cpu_processes = args.cpu_processes or rec.cpu_processes
 
-    cpu_processes = args.cpu_processes or min(
-        psutil.cpu_count(logical=False) or 1,
-        max(1, 6 * n_gpus),
-    )
-
-    print(f"{n_gpus} GPUs detected")
+    print(f"Model workers: {rec.devices}")
     print(f"Starting {cpu_processes} CPU workers")
 
     ctx = get_context("spawn")
-
-    manager = ctx.Manager()
-
-    gpu_task_queue = manager.JoinableQueue(
-        maxsize=args.gpu_in_flight_limit
-    )
-
-    gpu_results = manager.dict()
-
-    gpu_slots = manager.BoundedSemaphore(
-        args.gpu_in_flight_limit
-    )
-
-    gpu_workers = [
-        ctx.Process(
-            target=gpu_worker_loop,
-            args=(args, gpu, gpu_task_queue, gpu_results),
-        )
-        for gpu in range(n_gpus) for _ in range(0, args.workers_per_gpu)
-    ]
-
-    for worker in gpu_workers:
-        worker.start()
 
     worker_args = (
         (
             image_path,
             alignment_result,
             args,
-            gpu_task_queue,
-            gpu_results,
-            gpu_slots,
         )
         for image_path, alignment_result in pretty_output_dict.items()
     )
@@ -1203,7 +941,7 @@ def main():
         with ctx.Pool(
             processes=cpu_processes,
             initializer=init_worker,
-            initargs=(args.annotation_directory, args.config),
+            initargs=(args.annotation_directory, args.config, rec),
         ) as pool:
             for result in tqdm(
                 pool.imap_unordered(
@@ -1222,13 +960,7 @@ def main():
         )
 
     finally:
-        for _ in gpu_workers:
-            gpu_task_queue.put(None)
-
-        gpu_task_queue.join()
-
-        for worker in gpu_workers:
-            worker.join()
+        rec.close()
 
     finalize_blackout_logic_parallel(
         final_outputs,
