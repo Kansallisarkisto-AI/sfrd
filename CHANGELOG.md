@@ -7,6 +7,7 @@ The project currently uses date-based versioning. Version numbers may be introdu
 ## 2026-10-15
 
 ### Added
+- `--print_recognized` prints the recognized text of every text line (image, label, confidence, text) while processing, via `tqdm.write` so the progress bar stays intact. Lines are printed when an image finishes, so the order follows completion, not image order.
 - Text recognition can use a cyrillic model alongside the main one, with script classification choosing between them per line (optional; see the nafrec options `--cyrillic_recognition_model_path`, `--cyrillic_processor_path`, `--script_classification_model_path`).
 - Options not recognized by `structuralizer` are passed on to nafrec, so all nafrec options (e.g. `--device`, `--gpu_ids`, `--detector paddle`, PP-OCR models, fp16) are available on the SfRD command line. Mistakes in them are reported before the alignment step starts.
 - SfRD can run on CPU (nafrec's `--device cpu`); a GPU is no longer required.

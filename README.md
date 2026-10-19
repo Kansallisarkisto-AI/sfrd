@@ -17,7 +17,7 @@ structuralizer --input_directory ... --output_directory ... --annotation_directo
     --device cuda --gpu_ids 0 1 --tile_size 768
 ```
 
-uses a script classifier to send each line to the latin or the cyrillic recognition model. The cyrillic model is optional: with only one recognition model configured, all lines go to it. See `nafrec --help` for all options. The `--disregard_regions`/`--disregard_lines` options of SfRD itself are unchanged, and with both of them no detection model is needed. `--cpu_processes` sets the number of SfRD CPU workers; nafrec starts and manages the model (GPU) workers.
+uses a script classifier to send each line to the latin or the cyrillic recognition model. The cyrillic model is optional: with only one recognition model configured, all lines go to it. See `nafrec --help` for all options. The `--disregard_regions`/`--disregard_lines` options of SfRD itself are unchanged, and with both of them no detection model is needed. `--print_recognized` prints each recognized text line while processing. `--cpu_processes` sets the number of SfRD CPU workers; nafrec starts and manages the model (GPU) workers.
 
 If you don't know what the templates are in your collection, consider trying the ```--suggest_templates``` feature. The default (or a similarly strict) config is recommended for template finding.
 

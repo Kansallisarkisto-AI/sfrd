@@ -107,6 +107,15 @@ def parse_args():
     )
 
     parser.add_argument(
+        "--print_recognized",
+        action="store_true",
+        help=(
+            "Print the recognized text of every text line (image, label, confidence, text) "
+            "while processing, without breaking the progress bar"
+        )
+    )
+
+    parser.add_argument(
         "--suggest_templates",
         action="store_true",
         help="Suggest templates only, store in output directory."
@@ -499,9 +508,11 @@ def process_single_image(worker_args):
             - runtime arguments
 
     Returns:
-        tuple[dict, dict]:
+        tuple[dict, dict, list[str]]:
             - Structured OCR outputs grouped by template image.
             - Annotation label ordering metadata.
+            - Recognized text lines for printing (empty unless
+              --print_recognized is set).
     """
     (
         image_path,
@@ -513,6 +524,8 @@ def process_single_image(worker_args):
     classes = GLOBAL_CLASSES
     final_outputs = {}
     final_label_orders = {}
+    # lines of recognized text, printed by the main process (see main())
+    recognized_lines = []
 
     if args.disregard_regions and args.disregard_lines:
         # create dummy line preds if we disregard all segmentation predictions
@@ -757,6 +770,12 @@ def process_single_image(worker_args):
 
                 conf_label = "CONF_" + label
 
+                if args.print_recognized:
+                    recognized_lines.append(
+                        f"{Path(image_path).name} | {label} | "
+                        f"{conf:.2f} | {text!r}"
+                    )
+
                 if label in output_values:
                     output_values[label] += "\n" + text
                 else:
@@ -832,7 +851,7 @@ def process_single_image(worker_args):
 
         final_label_orders[output_key] = annotation_label_order
 
-    return final_outputs, final_label_orders
+    return final_outputs, final_label_orders, recognized_lines
 
 
 def json_default(o):
@@ -953,7 +972,14 @@ def main():
                 desc="Processing images",
                 dynamic_ncols=True,
             ):
-                results.append(result)
+                final_outputs_i, label_orders_i, recognized_lines = result
+
+                # tqdm.write prints above the progress bar without garbling it;
+                # printing happens here since worker processes can't coordinate with the bar
+                for line in recognized_lines:
+                    tqdm.write(line)
+
+                results.append((final_outputs_i, label_orders_i))
 
         final_outputs, final_label_orders = merge_results_parallel(
             results
