@@ -4,7 +4,7 @@ build-backend = "hatchling.build"
 
 [project]
 name = "sfrd"
-version = "0.1"
+version = "0.2.0"
 dependencies = [
   "opencv-python-headless>=4.10",
   "numpy>=2",
@@ -21,9 +21,10 @@ dependencies = [
   "simpleitk>=2.5.5",
   "torch-tps",
   "ortools",
-  "scipy"
+  "scipy",
+  "nafrec"
 ]
-requires-python = ">=3.11"
+requires-python = ">=3.12"
 authors = [
   {name = "John Mäkelä", email = "john.makela@kansallisarkisto.fi"},
 ]
