@@ -37,7 +37,7 @@ license = "Apache-2.0"
 license-files = ["LICEN[CS]E.*"]
 keywords = ["document understanding", "document", "analysis", "sfrd", "structure"]
 classifiers = [
-  "Development Status :: 3 - Alpha",
+  "Development Status :: 4 - Beta",
   "Programming Language :: Python :: 3.12",
   "Environment :: Console",
   "Environment :: GPU",
