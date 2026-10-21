@@ -50,7 +50,7 @@ classifiers = [
 
 [project.urls]
 Homepage = "https://github.com/Kansallisarkisto-AI/sfrd"
-Documentation = "https://readthedocs.org"
+Documentation = "https://github.com/Kansallisarkisto-AI/sfrd"
 Repository = "https://github.com/Kansallisarkisto-AI/sfrd"
 "Bug Tracker" = "https://github.com/Kansallisarkisto-AI/sfrd/issues"
 Changelog = "https://github.com/Kansallisarkisto-AI/sfrd/blob/master/CHANGELOG.md"
