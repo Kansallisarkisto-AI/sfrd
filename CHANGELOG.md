@@ -2,7 +2,18 @@
 
 All _major_ changes to this project will be documented in this file.
 
-The project currently uses date-based versioning. Version numbers may be introduced in the future.
+The project previously used date-based versioning, but is using version numbers since v0.2.0
+
+## v0.2.0
+
+### Added
+- GitHub Actions workflow for publishing to PyPI
+
+### Changed
+- Dependencies changed to point to published NAF packages on PyPI
+
+### Fixed
+- N/A
 
 ## 2026-10-15
 
