@@ -1,7 +1,7 @@
 # README
 Structure from Repeating Documents (SfRD) discovers and/or exploits structure in repeating series of documents to facilitate automated creation of research databases in a semi-supervised (and potentially fully unsupervised) manner, even in the presence of degradations and nuisance features. SfRD is inspired by Structure from motion (SfM) methods for reconstructing 3D structures from 2D images.
 
-[![ArchXAI project logo](https://centralbaltic.eu/wp-content/uploads/2025/07/ArchXAI_RGB_JPG-335x170.jpg)](https://centralbaltic.eu/project/archxai/)
+[![ArchXAI project logo](https://raw.githubusercontent.com/Kansallisarkisto-AI/nafrec/main/archxai_logo.jpg)](https://centralbaltic.eu/project/archxai/)
 
 ## Usage
 Install this package and the [nafrec](https://github.com/Kansallisarkisto-AI/nafrec) library (e.g. `pip install nafrec[gpu]` or `nafrec[cpu]`), then run the ```structuralizer``` command for help. User documentation will be added as the project matures.
