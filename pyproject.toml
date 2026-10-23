@@ -34,7 +34,7 @@ maintainers = [
 description = "Structure from Repeating Documents (SfRD) discovers and/or exploits structure in repeating series of segmented documents to facilitate automated creation of research databases in a semi-supervised (and potentially fully unsupervised) manner."
 readme = "README.md"
 license = "Apache-2.0"
-license-files = ["LICEN[CS]E.*"]
+license-files = ["LICEN[CS]E", "LICEN[CS]E.*"]
 keywords = ["document understanding", "document", "analysis", "sfrd", "structure"]
 classifiers = [
   "Development Status :: 4 - Beta",
