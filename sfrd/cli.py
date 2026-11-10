@@ -747,25 +747,22 @@ def process_single_image(worker_args):
         # classification (if a cyrillic model is configured) + recognition of the associated lines;
         # None if no lines were left in any region
         recognized = NAFREC.recognize(image_path, ordered_lines)
-        text_predictions = recognized[0] if recognized else []
+        page_regions = recognized[0]["regions"] if recognized else []
 
         for region_predictions, original_region in zip(
-            text_predictions,
+            page_regions,
             ordered_lines
         ):
-            region_predictions["line_labels"] = (
-                original_region["line_labels"]
-            )
-
             for label, recognition_result in zip(
-                region_predictions["line_labels"],
-                region_predictions["text_lines"]
+                original_region["line_labels"],
+                region_predictions["lines"]
             ):
+
                 if label.startswith("||") or label.startswith("__"):
                     continue
 
                 text = recognition_result["text"]
-                conf = recognition_result["text_conf"]
+                conf = recognition_result["conf"]
                 polygon = recognition_result["polygon"]
 
                 conf_label = "CONF_" + label

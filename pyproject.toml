@@ -4,7 +4,7 @@ build-backend = "hatchling.build"
 
 [project]
 name = "sfrd"
-version = "0.2.0"
+version = "0.2.1"
 dependencies = [
   "opencv-python-headless>=4.10",
   "numpy>=2",
