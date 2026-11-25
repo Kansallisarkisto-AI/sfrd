@@ -153,7 +153,7 @@ def hog_features(crops, size=(64, 16), cell=8):
     return features / np.maximum(np.linalg.norm(features, axis=1, keepdims=True), 1e-12)
 
 
-def unary_potential(test_annotation, pooled_training_annotations, k=9, weights=None, appearance="hog",
+def unary_potential(test_annotation, pooled_training_annotations, k=9, weights=None, appearance="pca",
                     crop_box=(0.3, 0.06), crop_size=(64, 16), hog_cell=8, pca_components=16, min_pca_samples=32,
                     label_balance=0.5, smoothing=0.01):
     """
@@ -188,8 +188,8 @@ def unary_potential(test_annotation, pooled_training_annotations, k=9, weights=N
 
     if appearance == "pca" and len(train) < min_pca_samples:
         warnings.warn(f"{len(train)} training boxes is too few for PCA (min_pca_samples={min_pca_samples}), "
-                      "using position and size only")
-        appearance = "none"
+                      "using HOG features instead")
+        appearance = "hog"
 
     if appearance == "hog":
         train_appearance = hog_features(train_crops, crop_size, hog_cell) * weights["hog"]
