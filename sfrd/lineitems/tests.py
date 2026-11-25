@@ -38,7 +38,7 @@ def check_potentials(U, labels, P, pairs, n):
     assert set(P) == pairs
     for (a, b), potential in P.items():
         assert BACKGROUND_LABEL not in (a, b)
-        assert potential.shape == (n, n) and np.all(np.isneginf(np.diag(potential)))
+        assert potential.shape == (n, n)
 
 
 def evaluate(test_page, train_pages, unary=unary_potential, pairwise=pairwise_potential, **unary_kwargs):

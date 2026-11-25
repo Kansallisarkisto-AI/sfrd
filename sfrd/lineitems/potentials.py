@@ -123,7 +123,7 @@ def pairwise_potential(test_annotation, pooled_training_annotations, min_std=0.0
         mean, std = distributions[(a, b)]
         P = (norm.logpdf(dx, loc=mean[0], scale=std[0]) +
              norm.logpdf(dy, loc=mean[1], scale=std[1])).astype(np.float32)
-        np.fill_diagonal(P, -np.inf)  # a box can not pair with itself
+        
         potentials[(a, b)] = P
     return potentials
 
@@ -216,11 +216,6 @@ def unary_potential(test_annotation, pooled_training_annotations, k=9, weights=N
     knn = KNeighborsClassifier(n_neighbors=min(k, len(train)), weights="distance")
     knn.fit(train_feats, [box["label"] for _, box in train])
     U = knn.predict_proba(test_feats)
-
-    # label prior correction for rare labels
-    counts = np.array([sum(box["label"] == label for _, box in train) for label in labels])
-    U = U / counts ** label_balance
-    U = U / U.sum(axis=1, keepdims=True)
 
     # smoothing keeps labels without neighbours possible (finite log probability)
     U = (U + smoothing) / (1 + len(labels) * smoothing)
