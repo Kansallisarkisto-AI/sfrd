@@ -113,14 +113,16 @@ def pairwise_potential(test_annotation, pooled_training_annotations, min_std=0.0
                                                   min_std, prior_std, prior_weight)
 
     boxes = test_annotation["boxes"]
-    n = len(boxes)
-    xy = np.array([[box["x"], box["y"]] for box in boxes]).reshape(n, 2)
-    offsets = xy[None, :, :] - xy[:, None, :]  # offsets[p, q] = position of q - position of p
+    x = np.array([box["x"] for box in boxes], dtype=float)
+    y = np.array([box["y"] for box in boxes], dtype=float)
+    dx = np.subtract.outer(x, x).T  # dx[p, q] = x[q] - x[p]
+    dy = np.subtract.outer(y, y).T  # dy[p, q] = y[q] - y[p]
 
     potentials = {}
     for a, b in allowed_pairs(pooled_training_annotations):
         mean, std = distributions[(a, b)]
-        P = norm.logpdf(offsets, loc=mean, scale=std).sum(axis=-1).astype(np.float32)
+        P = (norm.logpdf(dx, loc=mean[0], scale=std[0]) +
+             norm.logpdf(dy, loc=mean[1], scale=std[1])).astype(np.float32)
         np.fill_diagonal(P, -np.inf)  # a box can not pair with itself
         potentials[(a, b)] = P
     return potentials
