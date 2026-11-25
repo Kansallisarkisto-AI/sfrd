@@ -7,6 +7,7 @@ from .potentials import (
     pooled_line_items,
     DEFAULT_KNN_WEIGHTS,
     BACKGROUND_LABEL,
+    PRIOR_OFFSET_STD,
 )
 
 
@@ -19,4 +20,5 @@ __all__ = [
     "pooled_line_items",
     "DEFAULT_KNN_WEIGHTS",
     "BACKGROUND_LABEL",
+    "PRIOR_OFFSET_STD",
 ]
