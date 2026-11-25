@@ -22,7 +22,7 @@ import cv2
 import numpy as np
 from scipy.stats import norm
 from sklearn.decomposition import PCA
-from sklearn.neighbors import KNeighborsClassifier
+from sklearn.neighbors import NearestNeighbors
 
 
 # label of OCR units that belong to no field
@@ -123,7 +123,7 @@ def pairwise_potential(test_annotation, pooled_training_annotations, min_std=0.0
         mean, std = distributions[(a, b)]
         P = (norm.logpdf(dx, loc=mean[0], scale=std[0]) +
              norm.logpdf(dy, loc=mean[1], scale=std[1])).astype(np.float32)
-        
+
         potentials[(a, b)] = P
     return potentials
 
@@ -155,23 +155,38 @@ def hog_features(crops, size=(64, 16), cell=8):
     return features / np.maximum(np.linalg.norm(features, axis=1, keepdims=True), 1e-12)
 
 
+def class_balance_weights(train_labels, labels, label_balance):
+    """
+    Inverse class size weights for k-NN votes: weight[a] = n_a ** -label_balance, where n_a is the number of training
+    boxes with label labels[a]. label_balance 0 is no balancing, 1 is full inverse class size (each label then has the
+    same total vote mass over the training set), values in between (e.g. 0.5 = inverse square root) are a compromise.
+    Weights are normalized to mean 1 (only their ratios matter).
+    """
+    counts = np.array([np.sum(np.asarray(train_labels) == label) for label in labels], dtype=float)
+    w = np.maximum(counts, 1.0) ** -float(label_balance)
+    return w / w.mean()
+
+
 def unary_potential(test_annotation, pooled_training_annotations, k=9, weights=None, appearance="pca",
                     crop_box=(0.3, 0.06), crop_size=(64, 16), hog_cell=8, pca_components=16, min_pca_samples=32,
-                    label_balance=0.5, smoothing=0.01):
+                    smoothing=0.01, label_balance=0.5):
     """
     Calculate unary potential for different possible labels of bounding boxes in test_annotation based on k-NN to the training annotation
 
     k-NN features: top left location (x, y), width and height (w, h) and appearance of a fixed size image crop around
     the box (see box_crop()), each multiplied by its weight (weights overrides DEFAULT_KNN_WEIGHTS key by key).
-    appearance: "hog" (default, no fitting, works with any number of training boxes),
-                "pca" (PCA fitted on training crops, skipped with a warning if there are fewer than min_pca_samples
-                training boxes) or "none"
-    label_balance: label prior correction, k-NN votes are divided by the label's training frequency ** label_balance
-                   (0 = plain k-NN, 1 = all labels equally likely a priori). With few training line items, fields are
-                   rare among training boxes compared to background (and compared to test pages with more rows)
+    appearance: "hog" (no fitting, works with any number of training boxes),
+                "pca" (default, PCA fitted on training crops, falls back to HoG with a warning if there are fewer than
+                min_pca_samples training boxes) or "none"
+    label_balance: optional inverse class size weighting of the neighbour votes (see class_balance_weights()).
+                   0 (default) is plain inverse distance k-NN. With label_balance > 0 every neighbour's vote is also
+                   multiplied by (size of its label) ** -label_balance, so that the dominant BACKGROUND_LABEL (and
+                   other frequent labels) do not outvote rare fields just by being more numerous.
 
     Returns: (U, labels) where U[p, a] is the log probability of box p having label labels[a], shape (n_boxes, n_labels)
     """
+    if label_balance < 0:
+        raise ValueError(f"label_balance must be >= 0, got {label_balance}")
     weights = {**DEFAULT_KNN_WEIGHTS, **(weights or {})}
     labels = label_list(pooled_training_annotations)
 
@@ -180,6 +195,7 @@ def unary_potential(test_annotation, pooled_training_annotations, k=9, weights=N
     test = [(test_annotation["image"], box) for box in test_annotation["boxes"]]
     if not test:
         return np.zeros((0, len(labels))), labels
+    train_labels = [box["label"] for _, box in train]
 
     def geometry(boxes):
         return np.array([[box["x"] * weights["x"], box["y"] * weights["y"],
@@ -212,10 +228,28 @@ def unary_potential(test_annotation, pooled_training_annotations, k=9, weights=N
     train_feats = np.hstack([geometry(train), train_appearance])
     test_feats = np.hstack([geometry(test), test_appearance])
 
-    # k-NN turned into probabilities by weighing with inverse distance (columns of predict_proba are the sorted labels)
-    knn = KNeighborsClassifier(n_neighbors=min(k, len(train)), weights="distance")
-    knn.fit(train_feats, [box["label"] for _, box in train])
-    U = knn.predict_proba(test_feats)
+    # k-NN vote: every neighbour votes for its label with its inverse distance, times the class weight of its label.
+    # The vote is done here rather than in KNeighborsClassifier so that each weight is tied to its neighbour by index
+    label_index = {label: a for a, label in enumerate(labels)}
+    train_label_index = np.array([label_index[label] for label in train_labels])
+    train_weight = class_balance_weights(train_labels, labels, label_balance)[train_label_index]
+
+    nn = NearestNeighbors(n_neighbors=min(k, len(train))).fit(train_feats)
+    dist, neighbours = nn.kneighbors(test_feats)  # shape (n_test, n_neighbours), sorted by distance
+
+    # inverse distance as in KNeighborsClassifier(weights="distance"): if a query has zero distance neighbours
+    # (exact matches), only they vote, with equal weight
+    with np.errstate(divide="ignore"):
+        vote = 1.0 / dist
+    exact = np.isinf(vote)
+    exact_row = exact.any(axis=1)
+    vote[exact_row] = exact[exact_row]
+    vote *= train_weight[neighbours]
+
+    # sum the votes per label, U[p, a] = sum of the votes of neighbours of box p with label labels[a]
+    U = np.zeros((len(test), len(labels)))
+    np.add.at(U, (np.arange(len(test))[:, None], train_label_index[neighbours]), vote)
+    U /= U.sum(axis=1, keepdims=True)
 
     # smoothing keeps labels without neighbours possible (finite log probability)
     U = (U + smoothing) / (1 + len(labels) * smoothing)
