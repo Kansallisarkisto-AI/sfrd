@@ -24,6 +24,8 @@ from scipy.stats import norm
 from sklearn.decomposition import PCA
 from sklearn.neighbors import NearestNeighbors
 
+from scipy.stats import gaussian_kde
+
 
 # label of OCR units that belong to no field
 BACKGROUND_LABEL = "background"
@@ -98,6 +100,55 @@ def allowed_pairs(pooled_training_annotations):
                 pairs.add((item[i]["label"], item[j]["label"]))
     return pairs
 
+def background_log_density(pooled_training_annotations, dx, dy, max_samples=1000, seed=0):
+    """
+    Log density of offsets dx, dy between boxes of different line items
+
+    The "background" model of the pairwise potential: how the offset between two boxes is distributed when they are
+    NOT in the same line item. pairwise_potential() subtracts it from the in-line-item log density, so the potential
+    is a log likelihood ratio, log p(offset | same item) - log p(offset | different items), as in Fellegi-Sunter
+    record linkage (match vs. non-match).
+
+    Samples are the offsets b - a for every box a and box b in different line items of the same training page,
+    in both directions. The density is a 2D Gaussian kernel density estimate (scipy.stats.gaussian_kde, bandwidth by
+    Scott's rule): a small bell curve on every sample, averaged. It follows the shape of the data, so if boxes of
+    different line items are rarely on the same text line, the density dips at dy = 0 (but stays positive).
+    Evaluation time is proportional to the number of samples, so the KDE is fitted on at most max_samples of them,
+    drawn at random without replacement (seed makes it reproducible).
+    If the samples are too few or too degenerate for a KDE (no training page has two or more line items, or all
+    samples lie on one line), the density is uniform over all possible offsets, [-1, 1] x [-1, 1], so the log
+    density is log(1/4).
+
+    dx, dy: arrays of offsets (relative to page size), same shape
+    Returns: array of log densities, same shape as dx
+    """
+    allowed = allowed_pairs(pooled_training_annotations)
+    samples = []
+    for ann in pooled_training_annotations:
+        items = ann["line_items"]
+        for i, item_a in enumerate(items):
+            for j, item_b in enumerate(items):
+                if i == j:
+                    continue  # same line item, not background
+                for a in item_a:
+                    for b in item_b:
+                        if (a["label"], b["label"]) in allowed:
+                            samples.append((b["x"] - a["x"], b["y"] - a["y"]))
+    samples = np.array(samples)
+
+    if len(samples) > max_samples:
+        rng = np.random.default_rng(seed)
+        samples = samples[rng.choice(len(samples), size=max_samples, replace=False)]
+
+    try:
+        kde = gaussian_kde(samples.T)  # shape (2, n_samples)
+    except (ValueError, np.linalg.LinAlgError):
+        # no samples, fewer samples than dimensions, or singular covariance
+        return np.full(np.shape(dx), -np.log(4.0))
+
+    points = np.vstack([np.ravel(dx), np.ravel(dy)])
+    return kde.logpdf(points).reshape(np.shape(dx))
+
 
 def pairwise_potential(test_annotation, pooled_training_annotations, min_std=0.005,
                        prior_std=PRIOR_OFFSET_STD, prior_weight=2):
@@ -118,11 +169,14 @@ def pairwise_potential(test_annotation, pooled_training_annotations, min_std=0.0
     dx = np.subtract.outer(x, x).T  # dx[p, q] = x[q] - x[p]
     dy = np.subtract.outer(y, y).T  # dy[p, q] = y[q] - y[p]
 
+    log_bg = background_log_density(pooled_training_annotations, dx, dy)
+
     potentials = {}
     for a, b in allowed_pairs(pooled_training_annotations):
         mean, std = distributions[(a, b)]
+
         P = (norm.logpdf(dx, loc=mean[0], scale=std[0]) +
-             norm.logpdf(dy, loc=mean[1], scale=std[1])).astype(np.float32)
+             norm.logpdf(dy, loc=mean[1], scale=std[1]) - log_bg).astype(np.float32)
 
         potentials[(a, b)] = P
     return potentials
