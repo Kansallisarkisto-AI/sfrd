@@ -5,7 +5,8 @@ from ..unionfind import UnionFind
 from .potentials import BACKGROUND_LABEL
 
 
-def fit_model(unary_potentials, pairwise_potentials, unary_weight=1.0, pairwise_weight=0.05, pair_top_k=20):
+def fit_model(unary_potentials, pairwise_potentials, unary_weight=1.0, pairwise_weight=0.01, pair_top_k=50,
+              min_item_fields=0, dropped_penalty=1.0):
     """
     Label every box with exactly one label (a field label or BACKGROUND_LABEL), maximizing the weighted unary
     potentials of the chosen labels plus the weighted pairwise potentials of the chosen edges.
@@ -26,11 +27,13 @@ def fit_model(unary_potentials, pairwise_potentials, unary_weight=1.0, pairwise_
     pair_top_k: every box can only be in its pair_top_k edges with the highest pairwise potential (edges between
     boxes and labels, with a finite potential). An edge is possible if it is in the top pair_top_k of either of
     its boxes.
+    min_item_fields: smallest number of distinct fields in a training line item, from min_line_item_fields().
+    dropped_penalty: cost of every field missing below min_item_fields. It is counted at every box of a line item:
+    a box with a line item label should be linked by chosen edges directly to boxes of min_item_fields - 1 other
+    fields (only direct edges count, not paths). 0 (or min_item_fields <= 1) turns the penalty off.
     Returns: (label of every box, line items as lists of box indices, total value)
     """
     U, labels = unary_potentials
-    if BACKGROUND_LABEL not in labels:
-        U, labels = np.column_stack([U, np.zeros(len(U))]), list(labels) + [BACKGROUND_LABEL]
     n = len(U)
     index = {label: a for a, label in enumerate(labels)}
     line_labels = {index[label] for pair in pairwise_potentials for label in pair}
@@ -76,10 +79,29 @@ def fit_model(unary_potentials, pairwise_potentials, unary_weight=1.0, pairwise_
     for key, vars in incident.items():
         model.add_bool_or(vars + [box_labels[key].Not()])
 
+    # dropped fields: has[(p, a)] holds a bool for each other field b that is linked to box p with label a by a chosen
+    # edge, dropped = max(0, min_item_fields - 1 - number of linked fields) when p has label a, otherwise 0
+    dropped = []
+    if min_item_fields > 1 and dropped_penalty:
+        neighbour_edges = {key: {} for key in incident}  # (p, a) -> {b: edges linking p to a box with label b}
+        for var, (p, q, a, b, _) in zip(edge_vars, edges):
+            if a != b:  # edges inside one field (several tokens) do not add a field
+                neighbour_edges[p, a].setdefault(b, []).append(var)
+                neighbour_edges[q, b].setdefault(a, []).append(var)
+        for (p, a), by_field in neighbour_edges.items():
+            linked = []
+            for b, vars in by_field.items():
+                has = model.new_bool_var(f"linked{p}_{labels[a]}_{labels[b]}")
+                model.add_bool_or(vars).only_enforce_if(has)
+                linked.append(has)
+            d = model.new_int_var(0, min_item_fields - 1, f"dropped{p}_{labels[a]}")
+            model.add(d >= (min_item_fields - 1) * box_labels[p, a] - sum(linked))
+            dropped.append(d)
+
     accumulated_unary_potential = sum(float(unary_weight * U[p, a]) * var for (p, a), var in box_labels.items())
     accumulated_pairwise_potential = sum(float(pairwise_weight * potential) * var
                                          for var, (_, _, _, _, potential) in zip(edge_vars, edges))
-    model.maximize(accumulated_unary_potential + accumulated_pairwise_potential)
+    model.maximize(accumulated_unary_potential + accumulated_pairwise_potential - dropped_penalty * sum(dropped))
 
     solver = cp_model.CpSolver()
     solver.solve(model)

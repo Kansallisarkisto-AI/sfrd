@@ -50,6 +50,12 @@ def pooled_line_items(pooled_training_annotations):
     return [item for ann in pooled_training_annotations for item in ann["line_items"]]
 
 
+def min_line_item_fields(pooled_training_annotations):
+    """Smallest number of distinct fields in a training line item (0 if there are no line items)"""
+    return min((len({box["label"] for box in item}) for item in pooled_line_items(pooled_training_annotations)),
+               default=0)
+
+
 def label_list(pooled_training_annotations):
     """Sorted labels of training boxes (including BACKGROUND_LABEL if present), the label axis of the unary potential"""
     return sorted({box["label"] for ann in pooled_training_annotations for box in ann["boxes"]})
@@ -100,7 +106,7 @@ def allowed_pairs(pooled_training_annotations):
                 pairs.add((item[i]["label"], item[j]["label"]))
     return pairs
 
-def crisscrossing_log_density(pooled_training_annotations, dx, dy, max_samples=1000, seed=0, bandwidth="silverman"):
+def crisscrossing_log_density(pooled_training_annotations, dx, dy, max_samples=1000, seed=0, bandwidth="scott"):
     """
     Log density of offsets dx, dy between boxes of different line items
 
