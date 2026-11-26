@@ -18,6 +18,7 @@ import numpy as np
 
 from sfrd.annotations_vrdu import find_line_item_documents, add_images
 from sfrd.lineitems import unary_potential, pairwise_potential, allowed_pairs, BACKGROUND_LABEL
+from sfrd.lineitems.optimization import fit_model
 
 
 def limit_training(pages, max_pages=None, max_line_items=None):
@@ -45,6 +46,7 @@ def evaluate(test_page, train_pages, unary=unary_potential, pairwise=pairwise_po
     """
     Potentials for test_page from train_pages, scored against the test page annotations.
     Returns [field correct, field total, background correct, background total, pairs correct, pairs total]
+    for the unary potential and the pairwise potential, followed by the same six counts for the labeling of fit_model()
     """
     # inference input: OCR units and image only, annotations discarded
     test_annotation = {"image": test_page["image"],
@@ -86,12 +88,30 @@ def evaluate(test_page, train_pages, unary=unary_potential, pairwise=pairwise_po
                 best = np.argmax(P[(a, b)][p] + U[:, labels.index(b)])
                 pair_correct += true_item.get(best) == true_item[p] and true_labels[best] == b
 
-    return np.array([field_correct, len(fields), background_correct, len(background), pair_correct, pair_total])
+    # labeling: fit_model() on the potentials, scored like the unary labels. A true pair counts as correct if both of
+    # its units got their true labels and are in the same fitted line item
+    fitted, fitted_items, _ = fit_model((U, labels), P)
+    fit_field_correct = sum(fitted[p] == true_labels[p] for p in fields)
+    fit_background_correct = sum(fitted[p] == BACKGROUND_LABEL for p in background)
+    fitted_item = {p: k for k, item in enumerate(fitted_items) for p in item}
+    fit_pair_correct = 0
+    for item in test_page["line_items"]:
+        for i in range(len(item)):
+            for j in range(i + 1, len(item)):
+                p, q = index[id(item[i])], index[id(item[j])]
+                fit_pair_correct += (fitted[p] == item[i]["label"] and fitted[q] == item[j]["label"]
+                                     and p in fitted_item and fitted_item[p] == fitted_item.get(q))
+
+    return np.array([field_correct, len(fields), background_correct, len(background), pair_correct, pair_total,
+                     fit_field_correct, len(fields), fit_background_correct, len(background), fit_pair_correct,
+                     pair_total])
 
 
 def format_scores(scores):
     return (f"unary accuracy: fields {scores[0]}/{scores[1]}, background {scores[2]}/{scores[3]}; "
-            f"pairwise best partner accuracy {scores[4]}/{scores[5]}")
+            f"pairwise best partner accuracy {scores[4]}/{scores[5]}; "
+            f"labeling accuracy: fields {scores[6]}/{scores[7]}, background {scores[8]}/{scores[9]}, "
+            f"pairs {scores[10]}/{scores[11]}")
 
 
 def test_potentials(dataset_dir, documents, rng, max_pages=None, max_line_items=None, appearance="hog"):
@@ -117,7 +137,8 @@ def benchmark(dataset_dir, documents, rng, runs, appearances=("hog", "pca", "non
         test_page = rng.choice(pages)
         cases.append((test_page, [page for page in pages if page is not test_page]))
 
-    print(f"benchmark on {len(cases)} documents (fraction correct: fields, background, pairwise best partner)")
+    print(f"benchmark on {len(cases)} documents (fraction correct: unary fields, unary background, pairwise best partner, "
+          "labeling fields, labeling background, labeling pairs)")
     for max_pages, max_line_items in scenarios:
         for appearance in appearances:
             with warnings.catch_warnings():
@@ -125,7 +146,8 @@ def benchmark(dataset_dir, documents, rng, runs, appearances=("hog", "pca", "non
                 scores = sum(evaluate(test_page, limit_training(train_pages, max_pages, max_line_items),
                                       appearance=appearance) for test_page, train_pages in cases)
             print(f"  pages {max_pages or 'all'}, line items {max_line_items or 'all'}, {appearance:4s}: "
-                  f"{scores[0] / scores[1]:.3f} {scores[2] / scores[3]:.3f} {scores[4] / scores[5]:.3f}")
+                  f"{scores[0] / scores[1]:.3f} {scores[2] / scores[3]:.3f} {scores[4] / scores[5]:.3f}  "
+                  f"{scores[6] / scores[7]:.3f} {scores[8] / scores[9]:.3f} {scores[10] / scores[11]:.3f}")
 
 
 def test_minimal_sample(dataset_dir, documents, rng):
@@ -147,6 +169,25 @@ def test_minimal_sample(dataset_dir, documents, rng):
     print(f"minimal sample ok ({filename}: {len(train[0]['boxes'])} training boxes, {len(labels)} labels)")
 
 
+def test_fit_model():
+    """Synthetic potentials: two line items of two fields each, a field outside line items, and a tempting box"""
+    labels = ["a", "b", "c", BACKGROUND_LABEL]  # a and b are line item fields, c is not
+    #                  a     b     c     background
+    U = np.log([[0.88, 0.04, 0.04, 0.04],  # item 1, a
+                [0.04, 0.88, 0.04, 0.04],  # item 1, b
+                [0.88, 0.04, 0.04, 0.04],  # item 2, a
+                [0.04, 0.88, 0.04, 0.04],  # item 2, b
+                [0.04, 0.04, 0.88, 0.04],  # field c, needs no edge
+                [0.60, 0.02, 0.03, 0.35]])  # unary prefers a over background, but no edge is worth it
+    P = np.full((6, 6), -5.0)
+    P[0, 1] = P[2, 3] = 3.0
+
+    result, line_items, _ = fit_model((U, labels), {("a", "b"): P})
+    assert result == ["a", "b", "a", "b", "c", BACKGROUND_LABEL], result
+    assert line_items == [[0, 1], [2, 3]], line_items
+    print("fit_model ok")
+
+
 def main():
     parser = argparse.ArgumentParser()
     parser.add_argument("dataset_dir", help="VRDU dataset with line items, e.g. vrdu/ad-buy-form")
@@ -165,12 +206,13 @@ def main():
     print(f"{len(documents)} documents with line items on at least two pages")
 
     test_minimal_sample(args.dataset_dir, documents, rng)
+    #test_fit_model()
 
     if args.benchmark:
         benchmark(args.dataset_dir, documents, rng, args.runs)
         return
 
-    totals = np.zeros(6, dtype=int)
+    totals = np.zeros(12, dtype=int)
     for _ in range(args.runs):
         totals += test_potentials(args.dataset_dir, documents, rng, args.train_pages, args.train_line_items,
                                   args.appearance)
