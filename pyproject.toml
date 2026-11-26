@@ -22,7 +22,8 @@ dependencies = [
   "torch-tps",
   "ortools",
   "scipy",
-  "nafrec"
+  "nafrec",
+  "ortools"
 ]
 requires-python = ">=3.12"
 authors = [

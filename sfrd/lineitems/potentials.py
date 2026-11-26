@@ -100,7 +100,7 @@ def allowed_pairs(pooled_training_annotations):
                 pairs.add((item[i]["label"], item[j]["label"]))
     return pairs
 
-def background_log_density(pooled_training_annotations, dx, dy, max_samples=1000, seed=0):
+def crisscrossing_log_density(pooled_training_annotations, dx, dy, max_samples=1000, seed=0, bandwidth="silverman"):
     """
     Log density of offsets dx, dy between boxes of different line items
 
@@ -141,7 +141,7 @@ def background_log_density(pooled_training_annotations, dx, dy, max_samples=1000
         samples = samples[rng.choice(len(samples), size=max_samples, replace=False)]
 
     try:
-        kde = gaussian_kde(samples.T)  # shape (2, n_samples)
+        kde = gaussian_kde(samples.T, bw_method=bandwidth)  # shape (2, n_samples)
     except (ValueError, np.linalg.LinAlgError):
         # no samples, fewer samples than dimensions, or singular covariance
         return np.full(np.shape(dx), -np.log(4.0))
@@ -169,7 +169,7 @@ def pairwise_potential(test_annotation, pooled_training_annotations, min_std=0.0
     dx = np.subtract.outer(x, x).T  # dx[p, q] = x[q] - x[p]
     dy = np.subtract.outer(y, y).T  # dy[p, q] = y[q] - y[p]
 
-    log_bg = background_log_density(pooled_training_annotations, dx, dy)
+    log_bg = crisscrossing_log_density(pooled_training_annotations, dx, dy)
 
     potentials = {}
     for a, b in allowed_pairs(pooled_training_annotations):
